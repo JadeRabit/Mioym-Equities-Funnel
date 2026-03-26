@@ -72,109 +72,135 @@ $lastLead = !empty($leads) ? $leads[0] : null;
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
-<body class="bg-gradient-to-br from-slate-50 to-slate-100 text-slate-800 font-sans antialiased min-h-screen flex items-center justify-center p-5">
+<body class="bg-gradient-to-b from-slate-50 to-white text-slate-800 font-sans antialiased min-h-screen flex items-center justify-center p-4 md:p-6">
 
-    <main class="w-full max-w-md">
-        <!-- back link to index.php -->
-        <div class="mb-4 text-sm">
-            <a href="index.php" class="text-slate-500 hover:text-slate-800 inline-flex items-center gap-1 transition">
-                <i class="fas fa-arrow-left text-xs"></i> back to webinar info
-            </a>
-        </div>
+    <main class="w-full max-w-5xl">
+        <div class="bg-white rounded-[2rem] shadow-2xl border border-slate-100 overflow-hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-2">
+                <div class="p-8 md:p-10">
+                    <div class="flex items-center justify-between gap-4 flex-wrap">
+                        <a href="index.php" class="text-sm text-slate-500 hover:text-slate-800 inline-flex items-center gap-1 transition">
+                            <i class="fas fa-arrow-left text-xs"></i> back to webinar info
+                        </a>
+                        <span class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
+                            <i class="fas fa-rocket text-amber-500 text-xs"></i> Start a Project
+                        </span>
+                    </div>
 
-        <!-- registration card -->
-        <div class="bg-white rounded-3xl shadow-2xl border border-slate-100 p-8 md:p-9">
-            <div class="text-center mb-6">
-                <div class="bg-[#1e4a7a] w-16 h-16 rounded-2xl flex items-center justify-center text-white text-3xl mx-auto mb-4 shadow-md">
-                    <i class="fas fa-calendar-check"></i>
-                </div>
-                <h2 class="text-3xl font-bold text-slate-800">Webinar Registration</h2>
-                <p class="text-slate-500 mt-1 text-sm flex items-center justify-center gap-2">
-                    <i class="far fa-clock text-[#1e4a7a]"></i> Thursday 24 April · 6pm BST / 1pm EST
-                </p>
-            </div>
+                    <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-slate-900 mt-6 leading-tight">
+                        Let’s Build Your Digital Future
+                    </h1>
+                    <p class="text-slate-600 mt-4 max-w-xl text-sm md:text-base">
+                        Ready to join the webinar? Fill out the form to reserve your seat. Your registration is saved to our CRM and you’ll be redirected to the confirmation page.
+                    </p>
 
-            <!-- ===== WORKING FORM ===== -->
-            <!-- Fields: Name, Email, Phone Number -->
-            <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="space-y-5">
-                <!-- Name field (required) -->
-                <div>
-                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">
-                        <i class="far fa-user mr-1 text-slate-400"></i> Full Name <span class="text-rose-500">*</span>
-                    </label>
-                    <input type="text" name="name" required
-                           placeholder="Juan Dela Cruz"
-                           value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>"
-                           class="w-full px-5 py-3.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] outline-none transition bg-slate-50/50">
-                </div>
-
-                <!-- Email field (required) -->
-                <div>
-                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">
-                        <i class="far fa-envelope mr-1 text-slate-400"></i> Email Address <span class="text-rose-500">*</span>
-                    </label>
-                    <input type="email" name="email" required
-                           placeholder="juan@example.com"
-                           value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>"
-                           class="w-full px-5 py-3.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] outline-none transition bg-slate-50/50">
-                </div>
-
-                <!-- Phone Number field (optional) -->
-                <div>
-                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">
-                        <i class="fas fa-phone-alt mr-1 text-slate-400"></i> Phone Number <span class="text-slate-400 text-xs font-normal">(optional)</span>
-                    </label>
-                    <input type="tel" name="phone"
-                           placeholder="+63 912 345 6789"
-                           value="<?php echo isset($_POST['phone']) ? htmlspecialchars($_POST['phone']) : ''; ?>"
-                           class="w-full px-5 py-3.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] outline-none transition bg-slate-50/50">
-                </div>
-
-                <!-- Error message if validation fails -->
-                <?php if (!empty($error)): ?>
-                <div class="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2">
-                    <i class="fas fa-exclamation-circle"></i> <?php echo $error; ?>
-                </div>
-                <?php endif; ?>
-
-                <!-- Submit button -->
-                <button type="submit"
-                        class="w-full bg-[#1e4a7a] hover:bg-[#123a5e] text-white font-semibold text-lg py-4 rounded-full shadow-xl shadow-[#1e4a7a]/20 border border-[#1d4a7a] transition flex items-center justify-center gap-3 mt-5">
-                    <i class="fas fa-ticket-alt"></i> Register for Webinar
-                </button>
-
-                <!-- Data privacy notice -->
-                <p class="text-xs text-center text-slate-400 pt-2">
-                    <i class="fas fa-lock mr-1 text-[0.6rem]"></i> Your data is saved to our CRM (leads.txt) and never shared.
-                </p>
-            </form>
-
-            <!-- ===== CRM PREVIEW (shows last saved lead) ===== -->
-            <div class="relative my-6">
-                <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-slate-200"></div></div>
-                <div class="relative flex justify-center text-xs"><span class="bg-white px-3 text-slate-400">✓ CRM Preview</span></div>
-            </div>
-            <div class="bg-slate-50 rounded-xl p-4 border border-slate-100">
-                <h4 class="text-xs font-semibold text-slate-500 flex items-center gap-1 mb-2">
-                    <i class="fas fa-database"></i> Last Registration Saved:
-                </h4>
-                <div class="text-sm text-slate-700 space-y-1 min-h-[40px]">
-                    <?php if ($lastLead): ?>
-                        <div class="border-l-2 border-[#1e4a7a] pl-3 py-2 bg-white/50 rounded">
-                            <?php echo htmlspecialchars($lastLead); ?>
+                    <div class="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center">
+                                <i class="fas fa-phone text-sm"></i>
+                            </div>
+                            <div class="text-sm">
+                                <div class="font-semibold text-slate-800">+44 20 1234 5678</div>
+                                <div class="text-slate-500">Office hotline</div>
+                            </div>
                         </div>
-                    <?php else: ?>
-                        <span class="italic text-slate-400">No registrations yet.</span>
-                    <?php endif; ?>
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center">
+                                <i class="fas fa-map-marker-alt text-sm"></i>
+                            </div>
+                            <div class="text-sm">
+                                <div class="font-semibold text-slate-800">London, UK</div>
+                                <div class="text-slate-500">Mayfair office</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3 sm:col-span-2">
+                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center">
+                                <i class="fas fa-envelope text-sm"></i>
+                            </div>
+                            <div class="text-sm">
+                                <div class="font-semibold text-slate-800">hello@mioym.com</div>
+                                <div class="text-slate-500">Support email</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-8 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                        <div class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                            <i class="far fa-clock text-amber-500"></i> Thursday 24 April · 6pm BST / 1pm EST
+                        </div>
+                        <div class="text-xs text-slate-500 mt-2">60‑minute live training • replay available</div>
+                    </div>
                 </div>
-                <p class="text-[0.6rem] text-slate-400 mt-2">*Saved in leads.txt file - <?php echo file_exists($leadsFile) ? 'File exists' : 'File will be created on first registration'; ?></p>
+
+                <div class="bg-gradient-to-br from-[#0f2b44] to-[#1e4a7a] p-7 md:p-9">
+                    <div class="max-w-sm mx-auto">
+                        <div class="text-white font-extrabold text-xl md:text-2xl tracking-tight">Webinar Registration</div>
+                        <div class="text-white/80 text-sm mt-2">Complete the form to secure your spot.</div>
+
+                        <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="mt-6 space-y-4.5">
+                            <div>
+                                <label class="block text-sm font-semibold text-white mb-2">Your name <span class="text-white/70">*</span></label>
+                                <input type="text" name="name" required
+                                       placeholder="Name"
+                                       value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>"
+                                       class="w-full px-5 py-3.5 rounded-2xl bg-white/10 border border-white/20 text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-amber-400/40 focus:border-amber-400/50 transition">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-semibold text-white mb-2">Your email <span class="text-white/70">*</span></label>
+                                <input type="email" name="email" required
+                                       placeholder="Email"
+                                       value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>"
+                                       class="w-full px-5 py-3.5 rounded-2xl bg-white/10 border border-white/20 text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-amber-400/40 focus:border-amber-400/50 transition">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-semibold text-white mb-2">Your phone <span class="text-white/70 text-xs font-normal">(optional)</span></label>
+                                <input type="tel" name="phone"
+                                       placeholder="Phone"
+                                       value="<?php echo isset($_POST['phone']) ? htmlspecialchars($_POST['phone']) : ''; ?>"
+                                       class="w-full px-5 py-3.5 rounded-2xl bg-white/10 border border-white/20 text-white placeholder:text-white/60 focus:outline-none focus:ring-2 focus:ring-amber-400/40 focus:border-amber-400/50 transition">
+                            </div>
+
+                            <?php if (!empty($error)): ?>
+                            <div class="bg-white/15 text-rose-100 p-3 rounded-xl text-sm flex items-center gap-2 border border-white/20">
+                                <i class="fas fa-exclamation-circle"></i> <?php echo $error; ?>
+                            </div>
+                            <?php endif; ?>
+
+                            <button type="submit" class="w-full max-w-xs mx-auto mt-3 flex items-center justify-center gap-3 rounded-full bg-amber-500 hover:bg-amber-400 text-[#0f2b44] font-semibold text-base py-3 shadow-xl shadow-amber-500/20 transition">
+                                <span class="w-8 h-8 rounded-full bg-[#0f2b44] text-white flex items-center justify-center">
+                                    <i class="fas fa-paper-plane"></i>
+                                </span>
+                                <span>Submit</span>
+                            </button>
+
+                            <p class="text-xs text-white/80 flex items-center gap-2 justify-center">
+                                <i class="fas fa-lock text-[0.65rem]"></i> Saved to CRM (leads.txt). Never shared.
+                            </p>
+                        </form>
+
+                        <div class="mt-7 bg-white/10 rounded-2xl p-4 border border-white/20 backdrop-blur-sm">
+                            <h4 class="text-xs font-semibold text-white/90 flex items-center gap-2 mb-2">
+                                <i class="fas fa-database text-amber-300"></i> Last Registration Saved:
+                            </h4>
+                            <div class="text-sm text-white space-y-1 min-h-[40px]">
+                                <?php if ($lastLead): ?>
+                                    <div class="border-l-2 border-amber-400 pl-3 py-2 bg-white/10 rounded-xl">
+                                        <?php echo htmlspecialchars($lastLead); ?>
+                                    </div>
+                                <?php else: ?>
+                                    <span class="italic text-white/70">No registrations yet.</span>
+                                <?php endif; ?>
+                            </div>
+                            <p class="text-[0.65rem] text-white/70 mt-2">*Saved in leads.txt file - <?php echo file_exists($leadsFile) ? 'File exists' : 'File will be created on first registration'; ?></p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- footer -->
-        <p class="text-xs text-slate-400 text-center mt-6">
-            © 2025 Mioym Equities · Webinar Registration Demo
-        </p>
+        <p class="text-xs text-slate-400 text-center mt-6">© 2025 Mioym Equities · Webinar Registration Demo</p>
     </main>
 </body>
 </html>
