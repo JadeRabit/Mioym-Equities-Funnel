@@ -1,6 +1,6 @@
 <?php
 // thankyou.php - Thank You / Confirmation Page (FIXED - SCROLLABLE)
-$name = isset($_GET['name']) ? htmlspecialchars($_GET['name']) : 'Valued Investor';
+$name = isset($_GET['fullname']) ? htmlspecialchars($_GET['fullname']) : 'Valued Investor';
 ?>
 <!DOCTYPE html>
 <html lang="en">

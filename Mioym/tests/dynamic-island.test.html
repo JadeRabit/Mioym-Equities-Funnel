@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dynamic Island Tests</title>
+  <script defer src="../dynamic-island.js"></script>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; padding: 16px; }
+    .ok { color: #065f46; }
+    .fail { color: #991b1b; }
+    .log { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Dynamic Island Test Runner</h1>
+  <div id="out" class="log"></div>
+  <script>
+    function log(msg, cls) {
+      const out = document.getElementById('out');
+      const p = document.createElement('div');
+      if (cls) p.className = cls;
+      p.textContent = msg;
+      out.appendChild(p);
+    }
+    function approx(actual, target, tol) {
+      return Math.abs(actual - target) <= tol;
+    }
+    function testEnterDuration(targetMs=550, tol=50) {
+      return new Promise((resolve) => {
+        DynamicIsland.notify({ title:'Test', message:'Enter', type:'info', timeout: 1000 });
+        const poll = () => {
+          const d = DynamicIsland._test.lastEnterDuration();
+          if (d > 0) {
+            const ok = approx(d, targetMs, tol);
+            log(`Enter duration: ${d.toFixed(1)}ms (target ${targetMs}±${tol}) ${ok?'✓':'✗'}`, ok?'ok':'fail');
+            resolve(ok);
+          } else setTimeout(poll, 25);
+        };
+        poll();
+      });
+    }
+    function testExitDuration(targetMs=400, tol=50) {
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          // trigger hide
+          const root = document.getElementById('dynamic-island-root');
+          if (root && root.firstChild) {
+            // force a hide
+            root.firstChild.querySelector('.di-dismiss').click();
+          }
+          const poll = () => {
+            const d = DynamicIsland._test.lastExitDuration();
+            if (d > 0) {
+              const ok = approx(d, targetMs, tol);
+              log(`Exit duration: ${d.toFixed(1)}ms (target ${targetMs}±${tol}) ${ok?'✓':'✗'}`, ok?'ok':'fail');
+              resolve(ok);
+            } else setTimeout(poll, 25);
+          };
+          poll();
+        }, 200);
+      });
+    }
+    function testPosition() {
+      const root = document.getElementById('dynamic-island-root');
+      const rect = root.getBoundingClientRect();
+      const computed = DynamicIsland._test.rootOffset();
+      const distTop = Math.abs(rect.top - computed.top);
+      const distRight = Math.abs((window.innerWidth - rect.right) - computed.right);
+      const ok = distTop <= 2 && distRight <= 2;
+      log(`Position top/right delta: ${distTop.toFixed(2)}px / ${distRight.toFixed(2)}px ${ok?'✓':'✗'}`, ok?'ok':'fail');
+      return ok;
+    }
+    async function testBreakpoints() {
+      const widths = [360, 768, 1280];
+      let all = true;
+      for (const w of widths) {
+        Object.defineProperty(window, 'innerWidth', { value: w, configurable: true });
+        window.dispatchEvent(new Event('resize'));
+        DynamicIsland.notify({ title:`Width ${w}`, message:'layout check', type:'success', timeout: 600 });
+        await new Promise(r => setTimeout(r, 700));
+        all = testPosition() && all;
+      }
+      return all;
+    }
+    (async function run() {
+      log('Running tests…');
+      const e1 = await testEnterDuration();
+      const e2 = await testExitDuration();
+      const p1 = testPosition();
+      const b1 = await testBreakpoints();
+      const all = e1 && e2 && p1 && b1;
+      log(all ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED', all?'ok':'fail');
+    })();
+  </script>
+</body>
+</html>
