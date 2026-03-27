@@ -65,6 +65,81 @@
             background: rgba(255,255,255,0.15);
             backdrop-filter: blur(4px);
         }
+        .reviews-stage {
+            background: transparent;
+            border-radius: 2rem;
+            padding: 3rem 1.5rem;
+        }
+        .reviews-stack {
+            position: relative;
+            height: 360px;
+        }
+        .review-card {
+            position: absolute;
+            left: 50%;
+            top: 0;
+            width: min(100%, 22rem);
+            transition: transform 450ms ease, opacity 450ms ease, box-shadow 450ms ease;
+            transform: translate(-50%, 28px) scale(0.92);
+            opacity: 0.75;
+            z-index: 10;
+        }
+        .review-card.is-prev {
+            transform: translate(calc(-50% - 240px), 40px) scale(0.92);
+            opacity: 0.85;
+            z-index: 15;
+        }
+        .review-card.is-next {
+            transform: translate(calc(-50% + 240px), 40px) scale(0.92);
+            opacity: 0.85;
+            z-index: 15;
+        }
+        .review-card.is-active {
+            transform: translate(-50%, 0px) scale(1.05);
+            opacity: 1;
+            z-index: 25;
+            box-shadow: 0 25px 60px rgba(0,0,0,0.28);
+        }
+        .review-card.is-hidden {
+            opacity: 0;
+            transform: translate(-50%, 60px) scale(0.9);
+            z-index: 0;
+            pointer-events: none;
+        }
+        .review-rating {
+            display: inline-flex;
+            flex-direction: row-reverse;
+            gap: 0.25rem;
+        }
+        .review-rating input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+        .review-rating label {
+            cursor: pointer;
+            color: #cbd5e1;
+            font-size: 1.25rem;
+            line-height: 1;
+            transition: transform 120ms ease, color 120ms ease;
+        }
+        .review-rating label:hover,
+        .review-rating label:hover ~ label {
+            color: #f59e0b;
+            transform: translateY(-1px);
+        }
+        .review-rating input:checked ~ label {
+            color: #f59e0b;
+        }
+        @media (max-width: 768px) {
+            .reviews-stage { padding: 2rem 1rem; }
+            .reviews-stack { height: 360px; }
+            .review-card.is-prev,
+            .review-card.is-next {
+                opacity: 0;
+                pointer-events: none;
+            }
+        }
     </style>
 </head>
 <body class="bg-gradient-to-b from-slate-50 to-white text-slate-800 font-sans antialiased">
@@ -183,43 +258,80 @@
                 <span class="text-[#1e4a7a] font-semibold text-sm tracking-wider uppercase bg-slate-100 px-4 py-1.5 rounded-full">reviews</span>
                 <h2 class="text-3xl md:text-4xl font-bold text-slate-900 mt-5">What investors say</h2>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div class="bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-amber-200 text-[#0f2b44] flex items-center justify-center font-bold">AR</div>
-                            <div class="text-sm font-semibold text-slate-700">Angel R.</div>
+            <div class="reviews-stage relative">
+                <button type="button" data-reviews-prev aria-label="Previous review" class="hidden md:flex absolute left-6 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/95 border border-white/30 shadow-md items-center justify-center text-slate-700 hover:text-slate-900 hover:shadow-lg transition z-30">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <button type="button" data-reviews-next aria-label="Next review" class="hidden md:flex absolute right-6 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-white/95 border border-white/30 shadow-md items-center justify-center text-slate-700 hover:text-slate-900 hover:shadow-lg transition z-30">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+                <div id="reviewsCarousel" class="reviews-stack">
+                    <div class="review-card bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md min-h-[240px]">
+                        <div class="flex items-center justify-between gap-4">
+                            <div class="flex items-center gap-3 min-w-0">
+                                <div class="w-10 h-10 rounded-full bg-amber-200 text-[#0f2b44] flex items-center justify-center font-bold">AR</div>
+                                <div class="text-sm font-semibold text-slate-700 truncate">Angel R.</div>
+                            </div>
+                            <div class="flex items-center gap-0.5 text-amber-400 whitespace-nowrap shrink-0 leading-none">
+                                <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
+                            </div>
                         </div>
-                        <div class="flex text-amber-400">
-                            <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
+                        <p class="text-slate-700 mt-4">Clear, actionable and professional. The framework helped me screen deals in minutes and ask sharper questions.</p>
+                    </div>
+                    <div class="review-card bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md min-h-[240px]">
+                        <div class="flex items-center justify-between gap-4">
+                            <div class="flex items-center gap-3 min-w-0">
+                                <div class="w-10 h-10 rounded-full bg-amber-300 text-[#0f2b44] flex items-center justify-center font-bold">LM</div>
+                                <div class="text-sm font-semibold text-slate-700 truncate">Lina M.</div>
+                            </div>
+                            <div class="flex items-center gap-0.5 text-amber-400 whitespace-nowrap shrink-0 leading-none">
+                                <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
+                            </div>
+                        </div>
+                        <p class="text-slate-700 mt-4">Great insider perspective on co‑investment terms. I used the checklist to negotiate my first ticket.</p>
+                    </div>
+                    <div class="review-card bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md min-h-[240px]">
+                        <div class="flex items-center justify-between gap-4">
+                            <div class="flex items-center gap-3 min-w-0">
+                                <div class="w-10 h-10 rounded-full bg-amber-100 text-[#0f2b44] flex items-center justify-center font-bold">DK</div>
+                                <div class="text-sm font-semibold text-slate-700 truncate">Dmitri K.</div>
+                            </div>
+                            <div class="flex items-center gap-0.5 text-amber-400 whitespace-nowrap shrink-0 leading-none">
+                                <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
+                            </div>
+                        </div>
+                        <p class="text-slate-700 mt-4">Concise and practical. The underwriting template alone was worth it.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-10 max-w-3xl mx-auto bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 md:p-8 shadow-md">
+                <h3 class="text-2xl font-bold text-slate-900 text-center">Leave a review</h3>
+                <p class="text-slate-600 text-sm text-center mt-2">Hover the stars to rate, then submit your review.</p>
+                <form action="#" method="post" class="mt-6 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input type="text" name="r_name" placeholder="Your name" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-400" required>
+                        <div class="w-full px-4 py-3 rounded-xl border border-slate-200 bg-white flex items-center justify-between gap-3">
+                            <span class="text-sm font-semibold text-slate-700">Rating</span>
+                            <div class="review-rating" role="radiogroup" aria-label="Rating">
+                                <input type="radio" id="r_rating_5" name="r_rating" value="5" required>
+                                <label for="r_rating_5" aria-label="5 stars"><i class="fas fa-star"></i></label>
+                                <input type="radio" id="r_rating_4" name="r_rating" value="4">
+                                <label for="r_rating_4" aria-label="4 stars"><i class="fas fa-star"></i></label>
+                                <input type="radio" id="r_rating_3" name="r_rating" value="3">
+                                <label for="r_rating_3" aria-label="3 stars"><i class="fas fa-star"></i></label>
+                                <input type="radio" id="r_rating_2" name="r_rating" value="2">
+                                <label for="r_rating_2" aria-label="2 stars"><i class="fas fa-star"></i></label>
+                                <input type="radio" id="r_rating_1" name="r_rating" value="1">
+                                <label for="r_rating_1" aria-label="1 star"><i class="fas fa-star"></i></label>
+                            </div>
                         </div>
                     </div>
-                    <p class="text-slate-700 mt-4">Clear, actionable and professional. The framework helped me screen deals in minutes and ask sharper questions.</p>
-                </div>
-                <div class="bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-amber-300 text-[#0f2b44] flex items-center justify-center font-bold">LM</div>
-                            <div class="text-sm font-semibold text-slate-700">Lina M.</div>
-                        </div>
-                        <div class="flex text-amber-400">
-                            <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
-                        </div>
+                    <input type="email" name="r_email" placeholder="Email (optional)" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-400">
+                    <textarea name="r_message" rows="4" placeholder="Write your review..." class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-400" required></textarea>
+                    <div class="flex justify-center">
+                        <button type="submit" class="bg-amber-500 hover:bg-amber-400 text-[#0f2b44] font-bold px-8 py-3 rounded-full shadow-md transition">Submit review</button>
                     </div>
-                    <p class="text-slate-700 mt-4">Great insider perspective on co‑investment terms. I used the checklist to negotiate my first ticket.</p>
-                </div>
-                <div class="bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md">
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-amber-100 text-[#0f2b44] flex items-center justify-center font-bold">DK</div>
-                            <div class="text-sm font-semibold text-slate-700">Dmitri K.</div>
-                        </div>
-                        <div class="flex text-amber-400">
-                            <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
-                        </div>
-                    </div>
-                    <p class="text-slate-700 mt-4">Concise and practical. The underwriting template alone was worth it.</p>
-                </div>
+                </form>
             </div>
 
         <!-- ========== SECTION 4.4: SECOND CTA SECTION ========== -->
@@ -240,9 +352,9 @@
                     <h2 class="text-3xl font-bold text-slate-900">Contact us</h2>
                     <p class="text-slate-600">Questions about the webinar or co‑investing with us? Reach out and our team will respond within 24h.</p>
                     <div class="space-y-3">
-                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-envelope text-amber-500"></i><span>hello@mioym.com</span></div>
-                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-phone text-amber-500"></i><span>+44 20 1234 5678</span></div>
-                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-map-marker-alt text-amber-500"></i><span>Mayfair, London • EU office in Milan</span></div>
+                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-envelope text-amber-500"></i><span>Oscar@mioym.com</span></div>
+                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-phone text-amber-500"></i><span>914 566 9050</span></div>
+                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-map-marker-alt text-amber-500"></i><span>2900 Westchester Ave. Ste. 302 Purchase, NY 10577</span></div>
                     </div>
                 </div>
                 <form action="#" method="post" data-demo class="space-y-4">
@@ -276,6 +388,64 @@
                 alert('This is a demo placeholder.');
             });
         });
+        (() => {
+            const carousel = document.getElementById('reviewsCarousel');
+            if (!carousel) return;
+
+            const cards = Array.from(carousel.querySelectorAll('.review-card'));
+            if (cards.length === 0) return;
+
+            const prevBtn = document.querySelector('[data-reviews-prev]');
+            const nextBtn = document.querySelector('[data-reviews-next]');
+            let index = 0;
+            let timer = null;
+
+            const updateClasses = () => {
+                const prevIndex = (index - 1 + cards.length) % cards.length;
+                const nextIndex = (index + 1) % cards.length;
+                cards.forEach((card, i) => {
+                    card.classList.remove('is-prev', 'is-active', 'is-next', 'is-hidden');
+                    if (i === index) card.classList.add('is-active');
+                    else if (i === prevIndex) card.classList.add('is-prev');
+                    else if (i === nextIndex) card.classList.add('is-next');
+                    else card.classList.add('is-hidden');
+                });
+            };
+
+            const goTo = (nextIndex) => {
+                index = (nextIndex + cards.length) % cards.length;
+                updateClasses();
+            };
+
+            const start = () => {
+                stop();
+                timer = setInterval(() => goTo(index + 1), 4500);
+            };
+
+            const stop = () => {
+                if (timer) clearInterval(timer);
+                timer = null;
+            };
+
+            prevBtn?.addEventListener('click', () => {
+                goTo(index - 1);
+                start();
+            });
+            nextBtn?.addEventListener('click', () => {
+                goTo(index + 1);
+                start();
+            });
+
+            carousel.addEventListener('mouseenter', stop);
+            carousel.addEventListener('mouseleave', start);
+            carousel.addEventListener('focusin', stop);
+            carousel.addEventListener('focusout', start);
+            carousel.addEventListener('touchstart', stop, { passive: true });
+            carousel.addEventListener('touchend', start);
+
+            updateClasses();
+            start();
+        })();
     </script>
 </body>
 </html>

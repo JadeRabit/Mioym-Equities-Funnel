@@ -100,7 +100,7 @@ $lastLead = !empty($leads) ? $leads[0] : null;
                                 <i class="fas fa-phone text-sm"></i>
                             </div>
                             <div class="text-sm">
-                                <div class="font-semibold text-slate-800">+44 20 1234 5678</div>
+                                <div class="font-semibold text-slate-800">+63 914 566 9050</div>
                                 <div class="text-slate-500">Office hotline</div>
                             </div>
                         </div>
@@ -109,8 +109,8 @@ $lastLead = !empty($leads) ? $leads[0] : null;
                                 <i class="fas fa-map-marker-alt text-sm"></i>
                             </div>
                             <div class="text-sm">
-                                <div class="font-semibold text-slate-800">London, UK</div>
-                                <div class="text-slate-500">Mayfair office</div>
+                                <div class="font-semibold text-slate-800 leading-tight">2900 Westchester Ave.<br>Ste. 302 Purchase, NY 10577</div>
+                                <div class="text-slate-500 mt-0.5">Mayfair office</div>
                             </div>
                         </div>
                         <div class="flex items-center gap-3 sm:col-span-2">
@@ -118,13 +118,13 @@ $lastLead = !empty($leads) ? $leads[0] : null;
                                 <i class="fas fa-envelope text-sm"></i>
                             </div>
                             <div class="text-sm">
-                                <div class="font-semibold text-slate-800">hello@mioym.com</div>
+                                <div class="font-semibold text-slate-800">Oscar@mioym.com</div>
                                 <div class="text-slate-500">Support email</div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="mt-8 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
+                    <div class="mt-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                         <div class="text-sm font-semibold text-slate-800 flex items-center gap-2">
                             <i class="far fa-clock text-amber-500"></i> Thursday 24 April · 6pm BST / 1pm EST
                         </div>

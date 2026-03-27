@@ -217,6 +217,4 @@ $name = isset($_GET['name']) ? htmlspecialchars($_GET['name']) : 'Valued Investo
         </p>
     </main>
 </body>
-</html>git remote add origin https://github.com/JadeRabit/Mioym-Equities-Funnel.git
-git branch -M main
-git push -u origin main
+</html>
