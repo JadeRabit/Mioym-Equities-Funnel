@@ -1,11 +1,67 @@
 <!-- Sidebar Component -->
 <?php 
 $current_page = basename($_SERVER['PHP_SELF']); 
+$adminUsername = $_SESSION['admin_username'] ?? null;
+$adminSessionId = $_SESSION['admin_session_id'] ?? null;
+
+if (isset($_SESSION['admin_logged_in']) && $adminUsername && isset($pdo)) {
+    if (isset($_GET['mark_notifications_read']) && $_GET['mark_notifications_read'] === '1') {
+        try {
+            $pdo->exec("UPDATE admin_notifications SET is_read = 1 WHERE is_read = 0");
+        } catch (Throwable $e) {
+        }
+        $dest = strtok($_SERVER['REQUEST_URI'], '?');
+        $qs = $_GET;
+        unset($qs['mark_notifications_read']);
+        $redir = $dest . (count($qs) ? '?' . http_build_query($qs) : '');
+        header('Location: ' . $redir);
+        exit;
+    }
+
+    try {
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS admin_sessions (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(120) NOT NULL,
+                session_id VARCHAR(128) NOT NULL,
+                ip_address VARCHAR(64) NULL,
+                user_agent TEXT NULL,
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_seen_at TIMESTAMP NULL
+            )
+        ");
+    } catch (Throwable $e) {
+    }
+
+    if (is_string($adminSessionId) && $adminSessionId !== '') {
+        try {
+            $stmt = $pdo->prepare("SELECT is_active FROM admin_sessions WHERE username = ? AND session_id = ? ORDER BY id DESC LIMIT 1");
+            $stmt->execute([$adminUsername, $adminSessionId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row || (int)$row['is_active'] !== 1) {
+                $_SESSION = [];
+                if (ini_get("session.use_cookies")) {
+                    $params = session_get_cookie_params();
+                    setcookie(session_name(), '', time() - 42000, $params["path"], $params["domain"], $params["secure"], $params["httponly"]);
+                }
+                session_destroy();
+                header('Location: registration.php');
+                exit;
+            }
+            $upd = $pdo->prepare("UPDATE admin_sessions SET last_seen_at = NOW() WHERE username = ? AND session_id = ?");
+            $upd->execute([$adminUsername, $adminSessionId]);
+        } catch (Throwable $e) {
+        }
+    }
+}
+
 $page_titles = [
     'admin.php' => 'Dashboard',
     'webinars.php' => 'Webinars',
     'registrants.php' => 'Registrants',
-    'emails.php' => 'Email Automation'
+    'emails.php' => 'Email Automation',
+    'admin_profile.php' => 'Profile'
 ];
 $current_title = $page_titles[$current_page] ?? 'Admin';
 ?>
@@ -180,6 +236,18 @@ $current_title = $page_titles[$current_page] ?? 'Admin';
                     </div>
                     <span class="nav-text whitespace-nowrap transition-opacity duration-300">Email Automation</span>
                     <?php if($current_page == 'emails.php'): ?>
+                    <div class="absolute left-0 top-2 bottom-2 w-1 bg-white rounded-r-full md:hidden"></div>
+                    <?php endif; ?>
+                </a>
+            </li>
+
+            <li role="none">
+                <a href="admin_profile.php" role="menuitem" class="nav-link group relative flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 text-sm font-medium <?php echo $current_page == 'admin_profile.php' ? 'bg-[#1e4a7a] text-white shadow-md' : 'hover:bg-slate-800 hover:text-white text-slate-400'; ?> focus:outline-none focus:ring-2 focus:ring-slate-400" aria-current="<?php echo $current_page == 'admin_profile.php' ? 'page' : 'false'; ?>" title="Profile">
+                    <div class="min-w-[24px] flex justify-center">
+                        <i class="fas fa-user-circle text-lg <?php echo $current_page == 'admin_profile.php' ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'; ?> transition-colors"></i>
+                    </div>
+                    <span class="nav-text whitespace-nowrap transition-opacity duration-300">Profile</span>
+                    <?php if($current_page == 'admin_profile.php'): ?>
                     <div class="absolute left-0 top-2 bottom-2 w-1 bg-white rounded-r-full md:hidden"></div>
                     <?php endif; ?>
                 </a>

@@ -13,6 +13,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
     $stmt = $pdo->prepare("DELETE FROM registrants_tbl WHERE id IN ($placeholders)");
     $stmt->execute($ids);
+    if (function_exists('admin_notify')) {
+        admin_notify($pdo, 'registrants', 'Bulk Delete', count($ids) . ' registrants deleted.', 'registrants.php');
+    }
     $_SESSION['flash'] = count($ids) . " registrants deleted successfully.";
     $_SESSION['di'] = ['type'=>'warn','title'=>'Deleted','message'=>$_SESSION['flash']];
     header('Location: registrants.php');

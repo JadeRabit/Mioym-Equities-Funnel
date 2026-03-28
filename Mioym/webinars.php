@@ -7,6 +7,25 @@ if (!isset($_SESSION['admin_logged_in'])) {
     exit;
 }
 
+$hasDescription = true;
+try {
+    $pdo->query("SELECT description FROM webinar_tbl LIMIT 1");
+} catch (Throwable $e) {
+    $hasDescription = false;
+}
+if (!$hasDescription) {
+    try {
+        $pdo->exec("ALTER TABLE webinar_tbl ADD COLUMN description TEXT NULL");
+    } catch (Throwable $e) {
+    }
+    try {
+        $pdo->query("SELECT description FROM webinar_tbl LIMIT 1");
+        $hasDescription = true;
+    } catch (Throwable $e) {
+        $hasDescription = false;
+    }
+}
+
 // Handle CRUD & Actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $action = $_POST['action'];
@@ -29,12 +48,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'add_webinar') {
         $new_webinar_id = 'WB-' . mt_rand(10000, 99999);
         $status = $_POST['status'] ?? 'active';
+        $description = trim($_POST['description'] ?? '');
         
         $host_pic_path = handleUpload('host_pic');
         $webinar_vid_path = handleUpload('webinar_vid');
         
-        $stmt = $pdo->prepare("INSERT INTO webinar_tbl (title, hostname, host_pic, webinar_vid, webinar_id, webinar_link, `schedule_date&time`, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$_POST['title'], $_POST['hostname'], $host_pic_path, $webinar_vid_path, $new_webinar_id, $_POST['meeting_link'], $_POST['schedule_date_time'], $status]);
+        if ($hasDescription) {
+            $stmt = $pdo->prepare("INSERT INTO webinar_tbl (title, description, hostname, host_pic, webinar_vid, webinar_id, webinar_link, `schedule_date&time`, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$_POST['title'], $description, $_POST['hostname'], $host_pic_path, $webinar_vid_path, $new_webinar_id, $_POST['meeting_link'], $_POST['schedule_date_time'], $status]);
+        } else {
+            $stmt = $pdo->prepare("INSERT INTO webinar_tbl (title, hostname, host_pic, webinar_vid, webinar_id, webinar_link, `schedule_date&time`, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$_POST['title'], $_POST['hostname'], $host_pic_path, $webinar_vid_path, $new_webinar_id, $_POST['meeting_link'], $_POST['schedule_date_time'], $status]);
+        }
+        if (function_exists('admin_notify')) {
+            admin_notify($pdo, 'webinars', 'Webinar Created', (string)$_POST['title'], 'webinars.php');
+        }
         $_SESSION['flash'] = "Webinar created successfully!";
         $_SESSION['di'] = ['type'=>'success','title'=>'Webinar','message'=>$_SESSION['flash']];
     } elseif ($action === 'delete_webinar') {
@@ -49,6 +77,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         
         $stmt = $pdo->prepare("DELETE FROM webinar_tbl WHERE webinar_id=?");
         $stmt->execute([$_POST['id']]);
+        if (function_exists('admin_notify')) {
+            admin_notify($pdo, 'webinars', 'Webinar Deleted', (string)$_POST['id'], 'webinars.php');
+        }
         $_SESSION['flash'] = "Webinar deleted successfully!";
         $_SESSION['di'] = ['type'=>'warn','title'=>'Webinar','message'=>$_SESSION['flash']];
     } elseif ($action === 'edit_webinar') {
@@ -62,8 +93,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $webinar_vid_path = handleUpload('webinar_vid');
         
         // Build update query dynamically based on whether files were uploaded
-        $updateQuery = "UPDATE webinar_tbl SET title=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?";
-        $params = [$_POST['title'], $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status']];
+        $description = trim($_POST['description'] ?? '');
+        if ($hasDescription) {
+            $updateQuery = "UPDATE webinar_tbl SET title=?, description=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?";
+            $params = [$_POST['title'], $description, $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status']];
+        } else {
+            $updateQuery = "UPDATE webinar_tbl SET title=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?";
+            $params = [$_POST['title'], $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status']];
+        }
         
         if ($host_pic_path) {
             if ($old_webinar && $old_webinar['host_pic'] && file_exists($old_webinar['host_pic'])) {
@@ -85,6 +122,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         
         $stmt = $pdo->prepare($updateQuery);
         $stmt->execute($params);
+        if (function_exists('admin_notify')) {
+            admin_notify($pdo, 'webinars', 'Webinar Updated', (string)$_POST['title'], 'webinars.php');
+        }
         $_SESSION['flash'] = "Webinar updated successfully!";
         $_SESSION['di'] = ['type'=>'success','title'=>'Webinar','message'=>$_SESSION['flash']];
     } elseif ($action === 'publish_webinar') {
@@ -95,6 +135,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt = $pdo->prepare("UPDATE webinar_tbl SET is_published = 1 WHERE webinar_id = ?");
         $stmt->execute([$_POST['id']]);
         
+        if (function_exists('admin_notify')) {
+            admin_notify($pdo, 'webinars', 'Webinar Published', (string)$_POST['id'] . ' is now live on the landing page.', 'index.php');
+        }
         $_SESSION['flash'] = "Webinar published to Landing Page successfully!";
         $_SESSION['di'] = ['type'=>'success','title'=>'Webinar','message'=>$_SESSION['flash']];
     }
@@ -170,6 +213,7 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <thead>
                             <tr class="bg-slate-50/80 border-b border-slate-100 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                                 <th class="p-5">Webinar Details</th>
+                                <th class="p-5">Description</th>
                                 <th class="p-5">Schedule</th>
                                 <th class="p-5">Resources</th>
                                 <th class="p-5 text-center">Status</th>
@@ -207,6 +251,11 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                     <span class="text-slate-600 group-hover:text-indigo-600 transition-colors font-medium"><?php echo htmlspecialchars($w['hostname'] ?? 'No Host'); ?></span>
                                                 </div>
                                             </div>
+                                        </div>
+                                    </td>
+                                    <td class="p-5">
+                                        <div class="text-slate-700 font-medium line-clamp-2 max-w-md" title="<?php echo htmlspecialchars($w['description'] ?? ''); ?>">
+                                            <?php echo !empty($w['description']) ? htmlspecialchars($w['description']) : '<span class="text-slate-400 italic">No description</span>'; ?>
                                         </div>
                                     </td>
                                     <td class="p-5">
@@ -273,6 +322,7 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                 class="edit-webinar-btn w-10 h-10 flex items-center justify-center text-blue-600 hover:text-white bg-blue-50 hover:bg-blue-600 rounded-xl transition-all border border-transparent hover:border-blue-600 shadow-sm hover:shadow tooltip-trigger"
                                                 data-id="<?php echo $w['webinar_id']; ?>"
                                                 data-title="<?php echo htmlspecialchars($w['title']); ?>"
+                                                data-description="<?php echo htmlspecialchars($w['description'] ?? ''); ?>"
                                                 data-hostname="<?php echo htmlspecialchars($w['hostname'] ?? ''); ?>"
                                                 data-host-pic="<?php echo htmlspecialchars(str_replace('\\', '/', $w['host_pic'] ?? '')); ?>"
                                                 data-webinar-vid="<?php echo htmlspecialchars(str_replace('\\', '/', $w['webinar_vid'] ?? '')); ?>"
@@ -298,7 +348,7 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 <?php endforeach; ?>
                             <?php if(empty($webinars)): ?>
                             <tr>
-                                <td colspan="5" class="p-16 text-center">
+                                <td colspan="6" class="p-16 text-center">
                                     <div class="flex flex-col items-center justify-center">
                                         <div class="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4">
                                             <i class="fas fa-video-slash text-3xl text-slate-300"></i>
@@ -382,6 +432,11 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                 <div>
                                                     <label class="block text-sm font-semibold text-slate-700 mb-1.5">Webinar Title <span class="text-rose-500">*</span></label>
                                                     <input type="text" name="title" required placeholder="e.g., Q3 Market Analysis" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400">
+                                                </div>
+
+                                                <div>
+                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Description</label>
+                                                    <textarea name="description" rows="4" placeholder="Short summary or agenda for this webinar..." class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400 resize-none"></textarea>
                                                 </div>
 
                                                 <div class="grid grid-cols-2 gap-4">
@@ -516,6 +571,10 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <input type="text" name="title" id="modalTitle" required class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition" placeholder="Enter webinar title">
                             <p class="text-xs text-slate-400 mt-1">Use a clear, concise title to help attendees identify your event</p>
                         </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Description</label>
+                            <textarea name="description" id="modalDescription" rows="4" class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition resize-none" placeholder="Short summary or agenda for this webinar"></textarea>
+                        </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Host Name</label>
@@ -630,6 +689,7 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
             // Populate form fields from data attributes
             document.getElementById('modalWebinarId').value = button.dataset.id;
             document.getElementById('modalTitle').value = button.dataset.title;
+            document.getElementById('modalDescription').value = button.dataset.description || '';
             document.getElementById('modalHostname').value = button.dataset.hostname;
             document.getElementById('modalSchedule').value = button.dataset.schedule;
             document.getElementById('modalLink').value = button.dataset.link;

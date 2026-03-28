@@ -39,6 +39,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $stmt = $pdo->prepare("INSERT INTO registrants_tbl (fullname, email, phone, webinar_id, registration_date) VALUES (?, ?, ?, ?, NOW())");
         $stmt->execute([$fullname, $email, $phone, $webinar_id]);
+        if (function_exists('admin_notify')) {
+            $msg = $fullname . ' registered' . ($email ? ' (' . $email . ')' : '') . '.';
+            admin_notify($pdo, 'registrants', 'New Registration', $msg, 'registrants.php?search=' . urlencode($email ?: $fullname));
+        }
         header("Location: thankyou.php?fullname=" . urlencode($fullname));
         exit;
     }

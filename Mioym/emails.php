@@ -152,6 +152,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             } else {
                 $_SESSION['flash'] = "Successfully blasted emails to $sentCount registrants!";
             }
+            if ($action !== 'send_test_email' && function_exists('admin_notify')) {
+                $aud = $webinar_id === 'all' ? 'All registrants' : 'Selected audience';
+                admin_notify($pdo, 'emails', 'Email Campaign Sent', $sentCount . ' emails sent (' . $aud . ').', 'emails.php');
+            }
             $_SESSION['di'] = ['type'=>'success','title'=>'Emails','message'=>$_SESSION['flash']];
         } catch (Exception $e) {
             $_SESSION['flash'] = "Email sending failed. Mailer Error: {$mail->ErrorInfo}";

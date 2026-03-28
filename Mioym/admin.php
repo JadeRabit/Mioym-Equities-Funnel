@@ -24,11 +24,67 @@ try {
 }
 $adminDisplayName = $adminInfo['display_name'] ?? $adminUsername;
 $adminEmail = $adminInfo['email'] ?? null;
+$adminAvatarPath = $adminInfo['avatar_path'] ?? '';
+
+function admin_initials($name) {
+    $name = trim((string)$name);
+    if ($name === '') return 'A';
+    $parts = preg_split('/\s+/', $name);
+    $parts = array_values(array_filter($parts, static fn ($p) => $p !== ''));
+    if (count($parts) >= 2) return strtoupper(substr($parts[0], 0, 1) . substr($parts[count($parts)-1], 0, 1));
+    return strtoupper(substr($parts[0], 0, 2));
+}
+
+$adminAvatarFileOk = false;
+if (is_string($adminAvatarPath) && $adminAvatarPath !== '') {
+    $candidate = __DIR__ . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $adminAvatarPath);
+    if (file_exists($candidate)) $adminAvatarFileOk = true;
+}
+$adminAvatarInitials = admin_initials($adminDisplayName);
+
+$notifUnread = 0;
+$notifItems = [];
+try {
+    $notifUnread = (int)$pdo->query("SELECT COUNT(*) FROM admin_notifications WHERE is_read = 0")->fetchColumn();
+    $stmtN = $pdo->query("SELECT type, title, message, link_url, is_read, created_at FROM admin_notifications ORDER BY id DESC LIMIT 2");
+    $notifItems = $stmtN->fetchAll(PDO::FETCH_ASSOC) ?: [];
+} catch (Throwable $e) {
+    $notifUnread = 0;
+    $notifItems = [];
+}
+
+function admin_days_param() {
+    $v = isset($_GET['days']) ? (int)$_GET['days'] : 30;
+    $allowed = [7, 30, 90];
+    if (!in_array($v, $allowed, true)) $v = 30;
+    return $v;
+}
+function admin_build_url(array $overrides = [], array $removeKeys = []) {
+    $params = $_GET;
+    foreach ($removeKeys as $k) {
+        unset($params[$k]);
+    }
+    foreach ($overrides as $k => $v) {
+        if ($v === null) {
+            unset($params[$k]);
+        } else {
+            $params[$k] = $v;
+        }
+    }
+    return '?' . http_build_query($params);
+}
+function admin_build_url_with_days($days) {
+    return admin_build_url(['days' => (int)$days], ['mark_notifications_read', 'logout']);
+}
+
+$rangeDays = admin_days_param();
+$rangeLabel = $rangeDays === 7 ? 'Last 7 Days' : ($rangeDays === 90 ? 'Last 90 Days' : 'Last 30 Days');
+$rangeWhereSql = "registration_date >= DATE_SUB(CURDATE(), INTERVAL " . ($rangeDays - 1) . " DAY)";
 
 // Summary KPIs
-$totalRegistrants = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl")->fetchColumn();
-$totalEmailsSent = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE email_sent = 1")->fetchColumn();
-$webinarsCount = (int)$pdo->query("SELECT COUNT(*) FROM webinar_tbl WHERE LOWER(COALESCE(status,'')) IN ('active','upcoming','live')")->fetchColumn();
+$totalRegistrants = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE $rangeWhereSql")->fetchColumn();
+$totalEmailsSent = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE email_sent = 1 AND $rangeWhereSql")->fetchColumn();
+$webinarsCount = (int)$pdo->query("SELECT COUNT(*) FROM webinar_tbl WHERE LOWER(COALESCE(status,'')) IN ('active','upcoming','live') AND `schedule_date&time` >= NOW() AND `schedule_date&time` < DATE_ADD(NOW(), INTERVAL " . $rangeDays . " DAY)")->fetchColumn();
 
 // Fetch Recent Webinars
 $recentWebinars = $pdo->query("
@@ -40,69 +96,86 @@ $recentWebinars = $pdo->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 // Dynamic trends
-// Registrants: last 7 days vs previous 7 days
-$currentRegistrations7 = (int)$pdo->query("
-    SELECT COUNT(*) FROM registrants_tbl 
-    WHERE registration_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+$currentRegistrations = (int)$pdo->query("
+    SELECT COUNT(*) FROM registrants_tbl
+    WHERE $rangeWhereSql
 ")->fetchColumn();
-$previousRegistrations7 = (int)$pdo->query("
-    SELECT COUNT(*) FROM registrants_tbl 
-    WHERE registration_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-      AND registration_date < DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+$previousRegistrations = (int)$pdo->query("
+    SELECT COUNT(*) FROM registrants_tbl
+    WHERE registration_date >= DATE_SUB(CURDATE(), INTERVAL " . ((2 * $rangeDays) - 1) . " DAY)
+      AND registration_date < DATE_SUB(CURDATE(), INTERVAL " . ($rangeDays - 1) . " DAY)
 ")->fetchColumn();
-$regDelta = $currentRegistrations7 - $previousRegistrations7;
-$registrantsTrendVal = $previousRegistrations7 > 0 ? ($regDelta / $previousRegistrations7) * 100 : ($currentRegistrations7 > 0 ? 100 : 0);
+$regDelta = $currentRegistrations - $previousRegistrations;
+$registrantsTrendVal = $previousRegistrations > 0 ? ($regDelta / $previousRegistrations) * 100 : ($currentRegistrations > 0 ? 100 : 0);
 $registrantsTrend = ($registrantsTrendVal >= 0 ? '+' : '') . number_format($registrantsTrendVal, 1) . '%';
 
-// Emails delivered: last 7 days vs previous 7 (based on registration_date + email_sent flag)
-$currentEmails7 = (int)$pdo->query("
-    SELECT COUNT(*) FROM registrants_tbl 
-    WHERE email_sent = 1 
-      AND registration_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+// Emails delivered: selected range vs previous range
+$currentEmails = (int)$pdo->query("
+    SELECT COUNT(*) FROM registrants_tbl
+    WHERE email_sent = 1
+      AND $rangeWhereSql
 ")->fetchColumn();
-$previousEmails7 = (int)$pdo->query("
-    SELECT COUNT(*) FROM registrants_tbl 
-    WHERE email_sent = 1 
-      AND registration_date >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-      AND registration_date < DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+$previousEmails = (int)$pdo->query("
+    SELECT COUNT(*) FROM registrants_tbl
+    WHERE email_sent = 1
+      AND registration_date >= DATE_SUB(CURDATE(), INTERVAL " . ((2 * $rangeDays) - 1) . " DAY)
+      AND registration_date < DATE_SUB(CURDATE(), INTERVAL " . ($rangeDays - 1) . " DAY)
 ")->fetchColumn();
-$emailDelta = $currentEmails7 - $previousEmails7;
-$emailsTrendVal = $previousEmails7 > 0 ? ($emailDelta / $previousEmails7) * 100 : ($currentEmails7 > 0 ? 100 : 0);
+$emailDelta = $currentEmails - $previousEmails;
+$emailsTrendVal = $previousEmails > 0 ? ($emailDelta / $previousEmails) * 100 : ($currentEmails > 0 ? 100 : 0);
 $emailsTrend = ($emailsTrendVal >= 0 ? '+' : '') . number_format($emailsTrendVal, 1) . '%';
 
-// Webinars: upcoming next 30 days vs previous 30 days
+// Webinars: upcoming next range vs previous range
 $currentWebinars30 = (int)$pdo->query("
     SELECT COUNT(*) FROM webinar_tbl 
     WHERE LOWER(COALESCE(status,'')) IN ('active','upcoming','live')
       AND `schedule_date&time` >= NOW()
-      AND `schedule_date&time` < DATE_ADD(NOW(), INTERVAL 30 DAY)
+      AND `schedule_date&time` < DATE_ADD(NOW(), INTERVAL " . $rangeDays . " DAY)
 ")->fetchColumn();
 $previousWebinars30 = (int)$pdo->query("
     SELECT COUNT(*) FROM webinar_tbl 
     WHERE LOWER(COALESCE(status,'')) IN ('active','upcoming','live')
-      AND `schedule_date&time` >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      AND `schedule_date&time` >= DATE_SUB(NOW(), INTERVAL " . $rangeDays . " DAY)
       AND `schedule_date&time` < NOW()
 ")->fetchColumn();
 $webinarsTrendNum = $currentWebinars30 - $previousWebinars30;
 $webinarsTrend = ($webinarsTrendNum >= 0 ? '+' : '') . $webinarsTrendNum;
 
-// Area chart data: last 7 days registrations (date label + count)
+// Area chart data: selected range registrations
 $rows = $pdo->query("
     SELECT DATE(registration_date) AS d, COUNT(*) AS c
     FROM registrants_tbl
-    WHERE registration_date >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+    WHERE $rangeWhereSql
     GROUP BY DATE(registration_date)
     ORDER BY d
 ")->fetchAll(PDO::FETCH_KEY_PAIR);
 
 $areaLabels = [];
 $areaData = [];
-for ($i = 6; $i >= 0; $i--) {
-    $date = new DateTime();
-    $date->modify("-$i day");
-    $key = $date->format('Y-m-d');
-    $areaLabels[] = $date->format('D');
-    $areaData[] = isset($rows[$key]) ? (int)$rows[$key] : 0;
+if ($rangeDays <= 30) {
+    for ($i = $rangeDays - 1; $i >= 0; $i--) {
+        $date = new DateTime();
+        $date->modify("-$i day");
+        $key = $date->format('Y-m-d');
+        $areaLabels[] = $date->format('M j');
+        $areaData[] = isset($rows[$key]) ? (int)$rows[$key] : 0;
+    }
+} else {
+    $weekBuckets = [];
+    for ($i = $rangeDays - 1; $i >= 0; $i--) {
+        $date = new DateTime();
+        $date->modify("-$i day");
+        $key = $date->format('Y-m-d');
+        $weekKey = $date->format('o-\WW');
+        if (!isset($weekBuckets[$weekKey])) {
+            $weekBuckets[$weekKey] = 0;
+        }
+        $weekBuckets[$weekKey] += isset($rows[$key]) ? (int)$rows[$key] : 0;
+    }
+    foreach ($weekBuckets as $wk => $count) {
+        $areaLabels[] = $wk;
+        $areaData[] = (int)$count;
+    }
 }
 
 // Doughnut chart data: attendee sources if available; else sensible fallback
@@ -121,6 +194,7 @@ if ($hasSource) {
     $sourceRows = $pdo->query("
         SELECT LOWER(TRIM(source)) AS s, COUNT(*) AS c
         FROM registrants_tbl
+        WHERE $rangeWhereSql
         GROUP BY s
     ")->fetchAll(PDO::FETCH_ASSOC);
     $map = [
@@ -148,9 +222,9 @@ if ($hasSource) {
     $doughnutLabels = ['Social Media','Email Campaign','Direct','Referrals'];
     $doughnutData = $buckets;
 } else {
-    $linkedToWebinar = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE webinar_id IS NOT NULL")->fetchColumn();
-    $emailOnly = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE webinar_id IS NULL AND email_sent = 1")->fetchColumn();
-    $general = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE webinar_id IS NULL AND (email_sent = 0 OR email_sent IS NULL)")->fetchColumn();
+    $linkedToWebinar = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE webinar_id IS NOT NULL AND $rangeWhereSql")->fetchColumn();
+    $emailOnly = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE webinar_id IS NULL AND email_sent = 1 AND $rangeWhereSql")->fetchColumn();
+    $general = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE webinar_id IS NULL AND (email_sent = 0 OR email_sent IS NULL) AND $rangeWhereSql")->fetchColumn();
     $other = max(0, $totalRegistrants - $linkedToWebinar - $emailOnly - $general);
     $doughnutLabels = ['Linked to Webinar','Email Sent','General','Other'];
     $doughnutData = [$linkedToWebinar, $emailOnly, $general, $other];
@@ -233,21 +307,58 @@ if ($hasSource) {
                 <div x-data="{ notifyOpen: false }" class="relative">
                     <button @click="notifyOpen = !notifyOpen" @click.away="notifyOpen = false" class="relative p-2.5 text-slate-500 hover:text-blue-600 transition-colors rounded-xl hover:bg-blue-50 focus:outline-none">
                         <i class="far fa-bell text-[1.1rem]"></i>
+                        <?php if ($notifUnread > 0): ?>
                         <span class="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>
+                        <?php endif; ?>
                     </button>
                     <!-- Notification Dropdown Mockup -->
                     <div x-show="notifyOpen" x-transition.opacity.duration.200ms class="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-50" style="display: none;">
                         <div class="px-4 py-2 border-b border-slate-50 flex justify-between items-center">
                             <span class="font-bold text-sm text-slate-800">Notifications</span>
-                            <span class="text-xs text-blue-600 font-medium cursor-pointer">Mark all read</span>
+                            <a href="<?php echo htmlspecialchars(admin_build_url(['mark_notifications_read' => 1], ['logout'])); ?>" class="text-xs text-blue-600 font-bold hover:underline">Mark all read</a>
                         </div>
-                        <div class="px-4 py-3 hover:bg-slate-50 cursor-pointer flex gap-3">
-                            <div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0"><i class="fas fa-user-plus text-xs"></i></div>
-                            <div>
-                                <p class="text-sm text-slate-700"><span class="font-semibold">5 new registrations</span> for Q3 Market Analysis</p>
-                                <p class="text-xs text-slate-400 mt-0.5">2 mins ago</p>
+                        <?php if (!empty($notifItems)): ?>
+                            <?php foreach ($notifItems as $n): ?>
+                                <?php
+                                    $type = (string)($n['type'] ?? '');
+                                    $icon = 'fa-bell';
+                                    $bg = 'bg-slate-100';
+                                    $fg = 'text-slate-600';
+                                    if ($type === 'registrants') { $icon = 'fa-user-plus'; $bg = 'bg-blue-100'; $fg = 'text-blue-600'; }
+                                    elseif ($type === 'emails') { $icon = 'fa-paper-plane'; $bg = 'bg-emerald-100'; $fg = 'text-emerald-600'; }
+                                    elseif ($type === 'webinars') { $icon = 'fa-video'; $bg = 'bg-purple-100'; $fg = 'text-purple-600'; }
+                                    elseif ($type === 'contact') { $icon = 'fa-envelope-open-text'; $bg = 'bg-amber-100'; $fg = 'text-amber-700'; }
+                                    elseif ($type === 'feedback') { $icon = 'fa-star'; $bg = 'bg-amber-100'; $fg = 'text-amber-700'; }
+
+                                    $href = (string)($n['link_url'] ?? '');
+                                    $isRead = (int)($n['is_read'] ?? 0) === 1;
+                                    $ts = $n['created_at'] ?? null;
+                                    $timeStr = $ts ? date('M d, g:ia', strtotime($ts)) : '';
+                                ?>
+                                <a href="<?php echo htmlspecialchars($href !== '' ? $href : '#'); ?>" class="px-4 py-3 hover:bg-slate-50 cursor-pointer flex gap-3 <?php echo $isRead ? '' : 'bg-blue-50/30'; ?>">
+                                    <div class="w-8 h-8 rounded-full <?php echo $bg; ?> <?php echo $fg; ?> flex items-center justify-center shrink-0">
+                                        <i class="fas <?php echo $icon; ?> text-xs"></i>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p class="text-sm text-slate-700">
+                                            <span class="font-semibold"><?php echo htmlspecialchars((string)($n['title'] ?? '')); ?></span>
+                                            <?php if (!empty($n['message'])): ?>
+                                                <span class="text-slate-600">— <?php echo htmlspecialchars((string)$n['message']); ?></span>
+                                            <?php endif; ?>
+                                        </p>
+                                        <p class="text-xs text-slate-400 mt-0.5"><?php echo htmlspecialchars($timeStr); ?></p>
+                                    </div>
+                                </a>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="px-4 py-10 text-center">
+                                <div class="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 text-slate-400 mx-auto flex items-center justify-center">
+                                    <i class="far fa-bell"></i>
+                                </div>
+                                <div class="mt-3 text-sm font-bold text-slate-800">No notifications</div>
+                                <div class="text-xs text-slate-500 mt-1">Activity will appear here as it happens.</div>
                             </div>
-                        </div>
+                        <?php endif; ?>
                     </div>
                 </div>
                 
@@ -257,7 +368,13 @@ if ($hasSource) {
                 <div x-data="{ open: false }" class="relative">
                     <button @click="open = !open" @click.away="open = false" class="flex items-center gap-3 focus:outline-none group px-2 py-1 rounded-xl hover:bg-slate-50 transition-colors">
                         <div class="relative">
-                            <img src="https://ui-avatars.com/api/?name=<?php echo urlencode($adminDisplayName); ?>&background=0f172a&color=fff&rounded=true&bold=true" alt="Admin" class="w-8 h-8 rounded-full border-2 border-white shadow-sm group-hover:border-blue-100 transition-colors">
+                            <?php if ($adminAvatarFileOk): ?>
+                                <img src="<?php echo htmlspecialchars($adminAvatarPath); ?>" alt="Admin" class="w-8 h-8 rounded-full border-2 border-white shadow-sm group-hover:border-blue-100 transition-colors object-cover">
+                            <?php else: ?>
+                                <div class="w-8 h-8 rounded-full border-2 border-white shadow-sm group-hover:border-blue-100 transition-colors bg-slate-900 text-white flex items-center justify-center text-[11px] font-extrabold tracking-tight">
+                                    <?php echo htmlspecialchars($adminAvatarInitials); ?>
+                                </div>
+                            <?php endif; ?>
                             <div class="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-white rounded-full"></div>
                         </div>
                         <div class="text-left hidden lg:block pr-1">
@@ -273,8 +390,7 @@ if ($hasSource) {
                             <p class="text-xs text-slate-500"><?php echo htmlspecialchars($adminEmail); ?></p>
                             <?php endif; ?>
                         </div>
-                        <a href="#" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors"><i class="far fa-user w-4 text-center"></i> My Profile</a>
-                        <a href="#" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors"><i class="fas fa-cog w-4 text-center"></i> Workspace Settings</a>
+                        <a href="admin_profile.php" class="flex items-center gap-3 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-blue-600 transition-colors"><i class="far fa-user w-4 text-center"></i> My Profile</a>
                         <div class="border-t border-slate-50 my-1"></div>
                         <a href="admin.php?logout=true" class="flex items-center gap-3 px-4 py-2 text-sm text-rose-600 hover:bg-rose-50 transition-colors"><i class="fas fa-sign-out-alt w-4 text-center"></i> Sign out</a>
                     </div>
@@ -290,10 +406,24 @@ if ($hasSource) {
                     <h2 class="text-[28px] font-extrabold text-slate-800 tracking-tight leading-tight">Dashboard Overview</h2>
                     <p class="text-[15px] text-slate-500 mt-1 font-medium">Here's what's happening with your webinars today.</p>
                 </div>
-                <div class="hidden sm:flex bg-white rounded-xl shadow-sm border border-slate-200/80 p-1">
-                    <button class="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-50 rounded-lg shadow-sm flex items-center gap-2">
-                        <i class="far fa-calendar text-blue-500"></i> Last 30 Days <i class="fas fa-chevron-down text-[10px] ml-1 text-slate-400"></i>
+                <div x-data="{ open: false }" class="hidden sm:block relative">
+                    <button @click="open = !open" @click.away="open = false" class="bg-white rounded-xl shadow-sm border border-slate-200/80 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center gap-2">
+                        <i class="far fa-calendar text-blue-500"></i> <?php echo htmlspecialchars($rangeLabel); ?> <i class="fas fa-chevron-down text-[10px] ml-1 text-slate-400" :class="{'rotate-180': open}"></i>
                     </button>
+                    <div x-show="open" x-transition.opacity.duration.160ms class="absolute right-0 mt-2 w-44 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-50" style="display:none;">
+                        <a href="<?php echo htmlspecialchars(admin_build_url_with_days(7)); ?>" class="flex items-center justify-between px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                            <span>Last 7 Days</span>
+                            <?php if ($rangeDays === 7): ?><i class="fas fa-check text-[10px] text-emerald-500"></i><?php endif; ?>
+                        </a>
+                        <a href="<?php echo htmlspecialchars(admin_build_url_with_days(30)); ?>" class="flex items-center justify-between px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                            <span>Last 30 Days</span>
+                            <?php if ($rangeDays === 30): ?><i class="fas fa-check text-[10px] text-emerald-500"></i><?php endif; ?>
+                        </a>
+                        <a href="<?php echo htmlspecialchars(admin_build_url_with_days(90)); ?>" class="flex items-center justify-between px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                            <span>Last 90 Days</span>
+                            <?php if ($rangeDays === 90): ?><i class="fas fa-check text-[10px] text-emerald-500"></i><?php endif; ?>
+                        </a>
+                    </div>
                 </div>
             </div>
             
@@ -367,7 +497,13 @@ if ($hasSource) {
                     <div class="flex justify-between items-center mb-6">
                         <div>
                             <h3 class="text-[17px] font-bold text-slate-800 tracking-tight">Registration Trends</h3>
-                            <p class="text-xs text-slate-500 font-medium mt-0.5">Daily new registrations over the last 7 days</p>
+                            <p class="text-xs text-slate-500 font-medium mt-0.5">
+                                <?php if ($rangeDays <= 30): ?>
+                                    Daily new registrations over the last <?php echo (int)$rangeDays; ?> days
+                                <?php else: ?>
+                                    Weekly new registrations over the last <?php echo (int)$rangeDays; ?> days
+                                <?php endif; ?>
+                            </p>
                         </div>
                         <button class="w-8 h-8 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors">
                             <i class="fas fa-ellipsis-h"></i>
