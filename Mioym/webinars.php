@@ -26,6 +26,33 @@ if (!$hasDescription) {
     }
 }
 
+    $hasSubheading = true;
+try {
+    $pdo->query("SELECT subheading, subheading_size, subheading_bold FROM webinar_tbl LIMIT 1");
+} catch (Throwable $e) {
+    $hasSubheading = false;
+}
+if (!$hasSubheading) {
+    try {
+        $pdo->exec("ALTER TABLE webinar_tbl ADD COLUMN subheading TEXT NULL");
+    } catch (Throwable $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE webinar_tbl ADD COLUMN subheading_size INT NULL");
+    } catch (Throwable $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE webinar_tbl ADD COLUMN subheading_bold TINYINT(1) DEFAULT 1");
+    } catch (Throwable $e) {
+    }
+    try {
+        $pdo->query("SELECT subheading, subheading_size, subheading_bold FROM webinar_tbl LIMIT 1");
+        $hasSubheading = true;
+    } catch (Throwable $e) {
+        $hasSubheading = false;
+    }
+}
+
 // Handle CRUD & Actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $action = $_POST['action'];
@@ -49,17 +76,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $new_webinar_id = 'WB-' . mt_rand(10000, 99999);
         $status = $_POST['status'] ?? 'active';
         $description = trim($_POST['description'] ?? '');
+        $subheading = trim($_POST['subheading'] ?? '');
+        $subheadingSize = (int)($_POST['subheading_size'] ?? 20);
+        if ($subheadingSize < 10) $subheadingSize = 10;
+        if ($subheadingSize > 80) $subheadingSize = 80;
+        $subheadingBold = isset($_POST['subheading_bold']) ? 1 : 0;
         
         $host_pic_path = handleUpload('host_pic');
         $webinar_vid_path = handleUpload('webinar_vid');
         
+        $columns = ['title', 'hostname', 'host_pic', 'webinar_vid', 'webinar_id', 'webinar_link', '`schedule_date&time`', 'status'];
+        $values = [$_POST['title'], $_POST['hostname'], $host_pic_path, $webinar_vid_path, $new_webinar_id, $_POST['meeting_link'], $_POST['schedule_date_time'], $status];
+
         if ($hasDescription) {
-            $stmt = $pdo->prepare("INSERT INTO webinar_tbl (title, description, hostname, host_pic, webinar_vid, webinar_id, webinar_link, `schedule_date&time`, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$_POST['title'], $description, $_POST['hostname'], $host_pic_path, $webinar_vid_path, $new_webinar_id, $_POST['meeting_link'], $_POST['schedule_date_time'], $status]);
-        } else {
-            $stmt = $pdo->prepare("INSERT INTO webinar_tbl (title, hostname, host_pic, webinar_vid, webinar_id, webinar_link, `schedule_date&time`, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$_POST['title'], $_POST['hostname'], $host_pic_path, $webinar_vid_path, $new_webinar_id, $_POST['meeting_link'], $_POST['schedule_date_time'], $status]);
+            array_splice($columns, 1, 0, ['description']);
+            array_splice($values, 1, 0, [$description]);
         }
+        if ($hasSubheading) {
+            $columns[] = 'subheading';
+            $columns[] = 'subheading_size';
+            $columns[] = 'subheading_bold';
+            $values[] = $subheading !== '' ? $subheading : null;
+            $values[] = $subheadingSize;
+            $values[] = $subheadingBold;
+        }
+
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+        $sql = "INSERT INTO webinar_tbl (" . implode(', ', $columns) . ") VALUES (" . $placeholders . ")";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($values);
         if (function_exists('admin_notify')) {
             admin_notify($pdo, 'webinars', 'Webinar Created', (string)$_POST['title'], 'webinars.php');
         }
@@ -94,12 +139,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         
         // Build update query dynamically based on whether files were uploaded
         $description = trim($_POST['description'] ?? '');
+        $subheading = trim($_POST['subheading'] ?? '');
+        $subheadingSize = (int)($_POST['subheading_size'] ?? 20);
+        if ($subheadingSize < 10) $subheadingSize = 10;
+        if ($subheadingSize > 80) $subheadingSize = 80;
+        $subheadingBold = isset($_POST['subheading_bold']) ? 1 : 0;
         if ($hasDescription) {
             $updateQuery = "UPDATE webinar_tbl SET title=?, description=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?";
             $params = [$_POST['title'], $description, $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status']];
         } else {
             $updateQuery = "UPDATE webinar_tbl SET title=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?";
             $params = [$_POST['title'], $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status']];
+        }
+
+        if ($hasSubheading) {
+            $updateQuery .= ", subheading=?, subheading_size=?, subheading_bold=?";
+            $params[] = $subheading !== '' ? $subheading : null;
+            $params[] = $subheadingSize;
+            $params[] = $subheadingBold;
         }
         
         if ($host_pic_path) {
@@ -323,6 +380,9 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                 data-id="<?php echo $w['webinar_id']; ?>"
                                                 data-title="<?php echo htmlspecialchars($w['title']); ?>"
                                                 data-description="<?php echo htmlspecialchars($w['description'] ?? ''); ?>"
+                                                data-subheading="<?php echo htmlspecialchars($w['subheading'] ?? ''); ?>"
+                                                data-subheading-size="<?php echo htmlspecialchars((string)($w['subheading_size'] ?? 20)); ?>"
+                                                data-subheading-bold="<?php echo htmlspecialchars((string)($w['subheading_bold'] ?? 1)); ?>"
                                                 data-hostname="<?php echo htmlspecialchars($w['hostname'] ?? ''); ?>"
                                                 data-host-pic="<?php echo htmlspecialchars(str_replace('\\', '/', $w['host_pic'] ?? '')); ?>"
                                                 data-webinar-vid="<?php echo htmlspecialchars(str_replace('\\', '/', $w['webinar_vid'] ?? '')); ?>"
@@ -435,7 +495,24 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                 </div>
 
                                                 <div>
-                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Description</label>
+                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Subheading</label>
+                                                    <textarea name="subheading" rows="2" placeholder="Optional subheading (supports line breaks)" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400 resize-none"></textarea>
+                                                    <div class="mt-3 grid grid-cols-2 gap-4">
+                                                        <div>
+                                                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Font Size (px)</label>
+                                                            <input type="number" name="subheading_size" value="20" min="10" max="80" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800">
+                                                        </div>
+                                                        <div class="flex items-end">
+                                                            <label class="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
+                                                                <input type="checkbox" name="subheading_bold" value="1" checked class="w-4 h-4 rounded border-slate-300 text-[#1e4a7a] focus:ring-[#1e4a7a]/30">
+                                                                Bold
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div>
+                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5"></label>Description</label>
                                                     <textarea name="description" rows="4" placeholder="Short summary or agenda for this webinar..." class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400 resize-none"></textarea>
                                                 </div>
 
@@ -570,6 +647,22 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Webinar Title</label>
                             <input type="text" name="title" id="modalTitle" required class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition" placeholder="Enter webinar title">
                             <p class="text-xs text-slate-400 mt-1">Use a clear, concise title to help attendees identify your event</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Subheading</label>
+                            <textarea name="subheading" id="modalSubheading" rows="2" class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition resize-none" placeholder="Optional subheading (supports line breaks)"></textarea>
+                            <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Font Size (px)</label>
+                                    <input type="number" name="subheading_size" id="modalSubheadingSize" min="10" max="80" class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition" value="20">
+                                </div>
+                                <div class="flex items-end">
+                                    <label class="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
+                                        <input type="checkbox" name="subheading_bold" id="modalSubheadingBold" value="1" class="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30">
+                                        Bold
+                                    </label>
+                                </div>
+                            </div>
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Description</label>
@@ -721,6 +814,12 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
             document.getElementById('modalWebinarId').value = button.dataset.id;
             document.getElementById('modalTitle').value = button.dataset.title;
             document.getElementById('modalDescription').value = button.dataset.description || '';
+            const subheadingField = document.getElementById('modalSubheading');
+            const subheadingSizeField = document.getElementById('modalSubheadingSize');
+            const subheadingBoldField = document.getElementById('modalSubheadingBold');
+            if (subheadingField) subheadingField.value = button.dataset.subheading || '';
+            if (subheadingSizeField) subheadingSizeField.value = button.dataset.subheadingSize || '20';
+            if (subheadingBoldField) subheadingBoldField.checked = (button.dataset.subheadingBold || '1') === '1';
             document.getElementById('modalHostname').value = button.dataset.hostname;
             document.getElementById('modalSchedule').value = button.dataset.schedule;
             document.getElementById('modalLink').value = button.dataset.link;

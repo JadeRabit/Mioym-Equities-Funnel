@@ -314,6 +314,11 @@ if (!$latestWebinar) {
 $hostName = $latestWebinar['hostname'] ?? 'Elena Marchetti';
 $hostPic = $latestWebinar['host_pic'] ?? null;
 $webinarTitle = $latestWebinar['title'] ?? 'How to deploy €50k–€500k into institutional real estate (without connections)';
+$webinarSubheading = trim((string)($latestWebinar['subheading'] ?? ''));
+$webinarSubheadingSize = (int)($latestWebinar['subheading_size'] ?? 20);
+if ($webinarSubheadingSize < 10) $webinarSubheadingSize = 10;
+if ($webinarSubheadingSize > 80) $webinarSubheadingSize = 80;
+$webinarSubheadingBold = isset($latestWebinar['subheading_bold']) && (int)$latestWebinar['subheading_bold'] === 1;
 $webinarDescriptionRaw = trim((string)($latestWebinar['description'] ?? ''));
 $webinarDescriptionLines = preg_split("/\r\n|\r|\n/", $webinarDescriptionRaw);
 $webinarDescriptionLines = array_values(array_filter(array_map('trim', $webinarDescriptionLines), static fn ($l) => $l !== ''));
@@ -437,13 +442,16 @@ if ($feedbackTableReady) {
         }
         .reviews-stack {
             position: relative;
-            height: 360px;
+            height: 420px;
         }
         .review-card {
             position: absolute;
             left: 50%;
             top: 0;
             width: min(100%, 22rem);
+            height: 360px;
+            display: flex;
+            flex-direction: column;
             transition: transform 450ms ease, opacity 450ms ease, box-shadow 450ms ease;
             transform: translate(-50%, 28px) scale(0.92);
             opacity: 0.75;
@@ -496,9 +504,13 @@ if ($feedbackTableReady) {
         .review-rating input:checked ~ label {
             color: #f59e0b;
         }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .custom-scrollbar:hover::-webkit-scrollbar-thumb { background: #94a3b8; }
         @media (max-width: 768px) {
             .reviews-stage { padding: 2rem 1rem; }
-            .reviews-stack { height: 360px; }
+            .reviews-stack { height: 420px; }
             .review-card.is-prev,
             .review-card.is-next {
                 opacity: 0;
@@ -529,8 +541,9 @@ if ($feedbackTableReady) {
         <div class="flex justify-between items-center">
             <div class="flex items-center">
                 <div class=" bg-[#0f2b44] text-white w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-full ring-1 ring-white/15 shadow-lg flex items-center justify-center overflow-hidden">
-                    <img src="img/MIOYM_logo.png" alt="Mioym Group" class="w-full h-full object-contain p-2">
+                    <img src="img/logo.png" alt="Mioym Group" class="w-full h-full object-contain p-2">
                 </div>
+                <h1 class="ml-3 text-black font-extrabold text-3xl sm:text-4xl tracking-tight leading-none">Mioym Equities</h1>
             </div>
             <span class="inline-flex items-center gap-2 text-xs sm:text-sm bg-[#0f2b44] text-white border border-white/15 px-3 sm:px-4 py-2 rounded-full shadow-sm backdrop-blur">
                 <i class="far fa-calendar-alt text-amber-300"></i> <?php echo htmlspecialchars($scheduleDate); ?>
@@ -549,8 +562,16 @@ if ($feedbackTableReady) {
                         <span class="w-8 h-0.5 bg-amber-400"></span> exclusive live training
                     </p>
                     <h1 class="text-4xl md:text-5xl lg:text-5xl font-extrabold tracking-tight text-white leading-tight">
-                        <?php echo htmlspecialchars($webinarTitle); ?>
+                        <?php echo nl2br(htmlspecialchars($webinarTitle, ENT_QUOTES, 'UTF-8')); ?>
                     </h1>
+                    <?php if ($webinarSubheading !== ''): ?>
+                        <div class="mt-3 mb-5 text-white/90 tracking-tight leading-snug" style="font-size: <?php echo (int)$webinarSubheadingSize; ?>px; font-weight: <?php echo $webinarSubheadingBold ? 800 : 600; ?>;">
+                            <?php echo nl2br(htmlspecialchars($webinarSubheading, ENT_QUOTES, 'UTF-8')); ?>
+                        </div>
+                    <?php endif; ?>
+                    <p class="<?php echo $webinarSubheading !== '' ? 'mt-2' : 'mt-5'; ?> text-lg md:text-xl font-bold tracking-wide uppercase text-[#f59e0b] max-w-xl">
+                        USING SINGLE FAMILY HOMES BOUGHT RENOVATED AND SOLD TO FIRST TIME HOMEOWNERS
+                    </p>
                     <p class="text-lg md:text-xl text-slate-200 mt-6 max-w-lg">
                         <?php if ($webinarDescriptionLead !== ''): ?>
                             <?php echo htmlspecialchars($webinarDescriptionLead); ?>
@@ -622,15 +643,10 @@ if ($feedbackTableReady) {
                 <!-- Right side: Video placeholder -->
                 <div class="video-placeholder relative shadow-2xl rounded-2xl overflow-hidden group cursor-pointer border border-white/20" onclick="openVideoModal()">
                     <?php if($webinarVid): ?>
-                        <video id="previewVideo" class="absolute inset-0 w-full h-full object-cover opacity-80" muted loop playsinline>
+                        <video id="previewVideo" class="absolute inset-0 w-full h-full object-cover opacity-80" muted loop playsinline autoplay preload="metadata">
                             <source src="<?php echo htmlspecialchars($webinarVid); ?>" type="video/mp4">
                         </video>
                     <?php endif; ?>
-                    <div class="absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/40 transition duration-300">
-                        <div class="w-20 h-20 bg-white/90 rounded-full flex items-center justify-center shadow-2xl group-hover:scale-110 transition duration-300">
-                            <i class="fas fa-play text-3xl text-[#1e4a7a] ml-1"></i>
-                        </div>
-                    </div>
                     <div class="absolute bottom-3 left-4 text-white text-xs bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm">
                         <i class="far fa-clock mr-1"></i> 60 min · replay available
                     </div>
@@ -659,6 +675,64 @@ if ($feedbackTableReady) {
         </div>
     </div>
 
+    <div id="caseExamplesModal" class="fixed inset-0 z-50 hidden bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 md:p-10 opacity-0 transition-opacity duration-300">
+        <button onclick="closeCaseExamplesModal()" class="absolute top-6 right-6 text-white hover:text-amber-400 transition-colors bg-black/50 w-10 h-10 rounded-full flex items-center justify-center z-50">
+            <i class="fas fa-times text-xl"></i>
+        </button>
+        <div class="w-full max-w-7xl bg-black rounded-2xl overflow-hidden shadow-2xl relative transform scale-95 transition-transform duration-300" id="caseExamplesContainer">
+            <div class="relative">
+                <div id="caseExamplesImagesGrid" class="grid grid-cols-1 md:grid-cols-2 gap-1 p-1 bg-black">
+                    <img id="caseExamplesImageA" src="" alt="Case example" class="w-full max-h-[92vh] object-contain bg-black rounded-lg md:col-span-2">
+                    <img id="caseExamplesImageB" src="" alt="Case example" class="w-full max-h-[92vh] object-contain bg-black rounded-lg hidden">
+                </div>
+                <button type="button" onclick="caseExamplesPrev()" class="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 text-white hover:text-amber-300 transition-colors flex items-center justify-center">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <button type="button" onclick="caseExamplesNext()" class="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 text-white hover:text-amber-300 transition-colors flex items-center justify-center">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+            <div class="px-4 py-3 bg-black/60 text-white text-sm flex items-center justify-center">
+                <span id="caseExamplesCounter"></span>
+            </div>
+        </div>
+    </div>
+
+    <div id="contractorPdfModal" class="fixed inset-0 z-50 hidden bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 md:p-10 opacity-0 transition-opacity duration-300">
+        <button onclick="closeContractorPdfModal()" class="absolute top-6 right-6 text-white hover:text-amber-400 transition-colors bg-black/50 w-10 h-10 rounded-full flex items-center justify-center z-50">
+            <i class="fas fa-times text-xl"></i>
+        </button>
+        <div class="w-full max-w-7xl bg-black rounded-2xl overflow-hidden shadow-2xl relative transform scale-95 transition-transform duration-300" id="contractorPdfContainer">
+            <div class="flex flex-wrap items-center justify-center gap-2 p-3 bg-black/60">
+                <button type="button" id="contractorPdfBtn0" onclick="setContractorPdf(0)" class="px-3 py-2 rounded-full text-sm font-semibold bg-white text-[#0f2b44] hover:bg-amber-100 transition">
+                    Scope of Work
+                </button>
+                <button type="button" id="contractorPdfBtn1" onclick="setContractorPdf(1)" class="px-3 py-2 rounded-full text-sm font-semibold bg-white/10 text-white hover:bg-white/20 transition">
+                    Contractor License
+                </button>
+            </div>
+            <iframe id="contractorPdfFrame" class="w-full h-[82vh] md:h-[86vh] bg-black" src="" title="Contractor PDF" loading="lazy"></iframe>
+        </div>
+    </div>
+
+    <div id="statesPdfModal" class="fixed inset-0 z-50 hidden bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 md:p-10 opacity-0 transition-opacity duration-300">
+        <button onclick="closeStatesPdfModal()" class="absolute top-6 right-6 text-white hover:text-amber-400 transition-colors bg-black/50 w-10 h-10 rounded-full flex items-center justify-center z-50">
+            <i class="fas fa-times text-xl"></i>
+        </button>
+        <div class="w-full max-w-7xl bg-black rounded-2xl overflow-hidden shadow-2xl relative transform scale-95 transition-transform duration-300" id="statesPdfContainer">
+            <iframe id="statesPdfFrame" class="w-full h-[88vh] bg-black" src="" title="States we buy in" loading="lazy"></iframe>
+        </div>
+    </div>
+
+    <div id="faqsPdfModal" class="fixed inset-0 z-50 hidden bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 md:p-10 opacity-0 transition-opacity duration-300">
+        <button onclick="closeFaqsPdfModal()" class="absolute top-6 right-6 text-white hover:text-amber-400 transition-colors bg-black/50 w-10 h-10 rounded-full flex items-center justify-center z-50">
+            <i class="fas fa-times text-xl"></i>
+        </button>
+        <div class="w-full max-w-7xl bg-black rounded-2xl overflow-hidden shadow-2xl relative transform scale-95 transition-transform duration-300" id="faqsPdfContainer">
+            <iframe id="faqsPdfFrame" class="w-full h-[88vh] bg-black" src="" title="MIOYM FAQs" loading="lazy"></iframe>
+        </div>
+    </div>
+
         <!-- ========== SECTION 4.3: BENEFITS SECTION ========== -->
     <main class="max-w-6xl mx-auto px-5 sm:px-8 pb-10 md:pb-16">
         <div class="flex flex-col sm:flex-row items-center justify-center gap-8 mt-12 mb-16">
@@ -671,22 +745,87 @@ if ($feedbackTableReady) {
             </div>
             <div class="text-center sm:text-left">
                 <h3 class="text-2xl font-bold text-slate-800">Meet your host — <?php echo htmlspecialchars($hostName); ?></h3>
-                <p class="text-slate-600 mt-2 max-w-2xl">Expert in European real estate acquisitions and investment strategies.</p>
+                <p class="text-slate-600 mt-2 max-w-2xl">President of Mioym Equities</p>
             </div>
         </div>
         <div class="my-24 text-center">
             <span class="text-[#1e4a7a] font-semibold text-sm tracking-wider uppercase bg-slate-100 px-4 py-1.5 rounded-full">why attend</span>
-            <h2 class="text-3xl md:text-4xl font-bold text-slate-900 mt-5 mb-12 max-w-2xl mx-auto">In one session you'll discover how to:</h2>
+            <h2 class="text-3xl md:text-4xl font-bold text-slate-900 mt-5 mb-12 max-w-2xl mx-auto">In one session you'll discover how we:</h2>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 text-left">
-                <div class="bg-white/70 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md hover:shadow-lg transition"><div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5">🔑</div><h3 class="text-xl font-bold text-slate-800 mb-2">Access off‑market deals</h3><p class="text-slate-600">We reveal the exact relationships and platforms that let you see deals 48h before institutions.</p></div>
-                <div class="bg-white/70 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md hover:shadow-lg transition"><div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5">📊</div><h3 class="text-xl font-bold text-slate-800 mb-2">Model returns like a pro</h3><p class="text-slate-600">Step‑by‑step walkthrough of the 10‑minute underwriting template used by our analysts.</p></div>
-                <div class="bg-white/70 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md hover:shadow-lg transition"><div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5">⚖️</div><h3 class="text-xl font-bold text-slate-800 mb-2">Legal & tax shortcuts</h3><p class="text-slate-600">Common structures for non‑US investors to minimise withholding and optimize carry.</p></div>
-                <div class="bg-white/70 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md hover:shadow-lg transition"><div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5">🤝</div><h3 class="text-xl font-bold text-slate-800 mb-2">Co‑investment negotiation</h3><p class="text-slate-600">How to negotiate reduced fees and promoted interest even with €50k tickets.</p></div>
-                <div class="bg-white/70 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md hover:shadow-lg transition"><div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5">📈</div><h3 class="text-xl font-bold text-slate-800 mb-2">Portfolio diversification</h3><p class="text-slate-600">Learn why industrial/logistics assets currently offer better risk‑adjusted returns than residential.</p></div>
-                <div class="bg-white/70 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md hover:shadow-lg transition"><div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5">🎯</div><h3 class="text-xl font-bold text-slate-800 mb-2">Actionable Q&A session</h3><p class="text-slate-600">Live Q&A with our investment team — bring your specific questions.</p></div>
+                <a href="https://www.youtube.com/watch?v=D-BrVcxWSb0" target="_blank" rel="noopener noreferrer" class="group relative block bg-white/75 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 overflow-hidden h-[340px] sm:h-[360px]">
+                    <div class="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div class="relative flex flex-col h-full">
+                        <div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5 shadow-sm ring-1 ring-white/60 group-hover:scale-105 transition-transform duration-300">🔑</div>
+                        <h3 class="text-xl font-bold text-slate-800 mb-2 tracking-tight">How we Access Opportunistic Undervalue Assets</h3>
+                        <p class="text-slate-600 leading-relaxed text-sm flex-1 overflow-hidden"></p>
+                        <span class="mt-auto inline-flex items-center gap-2 text-sm font-semibold text-[#0f2b44] bg-amber-100/80 border border-amber-200 px-3 py-1.5 rounded-full w-fit">
+                            Click to view <i class="fas fa-arrow-right text-xs"></i>
+                        </span>
+                    </div>
+                </a>
+
+                <div role="button" tabindex="0" onclick="openCaseExamplesModal()" class="group relative bg-white/75 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-slate-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 overflow-hidden h-[340px] sm:h-[360px]">
+                    <div class="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div class="relative flex flex-col h-full">
+                        <div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5 shadow-sm ring-1 ring-white/60 group-hover:scale-105 transition-transform duration-300">📊</div>
+                        <h3 class="text-xl font-bold text-slate-800 mb-2 tracking-tight">Case Examples of Returns</h3>
+                        <p class="text-slate-600 leading-relaxed text-sm flex-1 overflow-hidden">Step‑by‑step walkthrough of the 10‑minute underwriting template used by our analysts.</p>
+                        <span class="mt-auto inline-flex items-center gap-2 text-sm font-semibold text-[#0f2b44] bg-amber-100/80 border border-amber-200 px-3 py-1.5 rounded-full w-fit">
+                            Click to view <i class="fas fa-arrow-right text-xs"></i>
+                        </span>
+                    </div>
+                </div>
+
+                <div role="button" tabindex="0" onclick="openAffordableHomesModal()" class="group relative bg-white/75 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-slate-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 overflow-hidden h-[340px] sm:h-[360px]">
+                    <div class="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div class="relative flex flex-col h-full">
+                        <div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5 shadow-sm ring-1 ring-white/60 group-hover:scale-105 transition-transform duration-300">⚖️</div>
+                        <h3 class="text-xl font-bold text-slate-800 mb-2 tracking-tight">Sell/Liquidate to First time Home Buyers</h3>
+                        <p class="text-slate-600 leading-relaxed text-sm flex-1 overflow-hidden">Own A Home For The Same Amount You Pay In Rent Downpayment and Closing Cost Provided 600 Minimum Credit Score to qualify Move in with first month’s payment and security deposit</p>
+                        <span class="mt-auto inline-flex items-center gap-2 text-sm font-semibold text-[#0f2b44] bg-amber-100/80 border border-amber-200 px-3 py-1.5 rounded-full w-fit">
+                            Click to view <i class="fas fa-arrow-right text-xs"></i>
+                        </span>
+                    </div>
+                </div>
+
+                <div role="button" tabindex="0" onclick="openContractorPdfModal()" class="group relative bg-white/75 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-slate-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 overflow-hidden h-[340px] sm:h-[360px]">
+                    <div class="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div class="relative flex flex-col h-full">
+                        <div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5 shadow-sm ring-1 ring-white/60 group-hover:scale-105 transition-transform duration-300">🤝</div>
+                        <h3 class="text-xl font-bold text-slate-800 mb-2 tracking-tight">Contractor Management</h3>
+                        <p class="text-slate-600 leading-relaxed text-sm flex-1 overflow-hidden">How to control boots on the ground and scopes of works.</p>
+                        <span class="mt-auto inline-flex items-center gap-2 text-sm font-semibold text-[#0f2b44] bg-amber-100/80 border border-amber-200 px-3 py-1.5 rounded-full w-fit">
+                            Click to view <i class="fas fa-arrow-right text-xs"></i>
+                        </span>
+                    </div>
+                </div>
+
+                <div role="button" tabindex="0" onclick="openStatesPdfModal()" class="group relative bg-white/75 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-slate-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 overflow-hidden h-[340px] sm:h-[360px]">
+                    <div class="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div class="relative flex flex-col h-full">
+                        <div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5 shadow-sm ring-1 ring-white/60 group-hover:scale-105 transition-transform duration-300">📈</div>
+                        <h3 class="text-xl font-bold text-slate-800 mb-2 tracking-tight">Portfolio diversification</h3>
+                        <p class="text-slate-600 leading-relaxed text-sm flex-1 overflow-hidden"></p>
+                        <span class="mt-auto inline-flex items-center gap-2 text-sm font-semibold text-[#0f2b44] bg-amber-100/80 border border-amber-200 px-3 py-1.5 rounded-full w-fit">
+                            Click to view <i class="fas fa-arrow-right text-xs"></i>
+                        </span>
+                    </div>
+                </div>
+
+                <div role="button" tabindex="0" onclick="openFaqsPdfModal()" class="group relative bg-white/75 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-slate-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-50 overflow-hidden h-[340px] sm:h-[360px]">
+                    <div class="absolute inset-0 bg-gradient-to-br from-white/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div class="relative flex flex-col h-full">
+                        <div class="w-12 h-12 bg-[#e1ecf9] rounded-xl flex items-center justify-center text-[#1e4a7a] text-2xl mb-5 shadow-sm ring-1 ring-white/60 group-hover:scale-105 transition-transform duration-300">🎯</div>
+                        <h3 class="text-xl font-bold text-slate-800 mb-2 tracking-tight">Actionable Q&A session</h3>
+                        <p class="text-slate-600 leading-relaxed text-sm flex-1 overflow-hidden">Live Q&A with our investment team — bring your specific questions.</p>
+                        <span class="mt-auto inline-flex items-center gap-2 text-sm font-semibold text-[#0f2b44] bg-amber-100/80 border border-amber-200 px-3 py-1.5 rounded-full w-fit">
+                            Click to view <i class="fas fa-arrow-right text-xs"></i>
+                        </span>
+                    </div>
+                </div>
             </div>
         </div>
-        <div class="my-20" id="reviews">
+        <div class="my-20 mb-5" id="reviews">
             <div class="text-center mb-10">
                 <span class="text-[#1e4a7a] font-semibold text-sm tracking-wider uppercase bg-slate-100 px-4 py-1.5 rounded-full">reviews</span>
                 <h2 class="text-3xl md:text-4xl font-bold text-slate-900 mt-5">What investors say</h2>
@@ -710,10 +849,10 @@ if ($feedbackTableReady) {
                                 if ($rt < 1) $rt = 1;
                                 if ($rt > 5) $rt = 5;
                             ?>
-                            <div class="review-card bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md min-h-[240px]">
-                                <div class="flex items-center justify-between gap-4">
+                            <div class="review-card bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md h-[360px]">
+                                <div class="flex items-center justify-between gap-4 shrink-0">
                                     <div class="flex items-center gap-3 min-w-0">
-                                        <div class="w-10 h-10 rounded-full <?php echo $badge; ?> text-[#0f2b44] flex items-center justify-center font-bold">
+                                        <div class="w-10 h-10 rounded-full <?php echo $badge; ?> text-[#0f2b44] flex items-center justify-center font-bold shrink-0">
                                             <?php echo htmlspecialchars(getInitials($nm)); ?>
                                         </div>
                                         <div class="text-sm font-semibold text-slate-700 truncate"><?php echo htmlspecialchars($nm); ?></div>
@@ -724,26 +863,30 @@ if ($feedbackTableReady) {
                                         <?php endfor; ?>
                                     </div>
                                 </div>
-                                <p class="text-slate-700 mt-4 whitespace-pre-line"><?php echo htmlspecialchars($msg); ?></p>
+                                <div class="mt-4 flex-1 overflow-y-auto custom-scrollbar pr-1">
+                                    <p class="text-slate-700 whitespace-pre-line"><?php echo htmlspecialchars($msg); ?></p>
+                                </div>
                             </div>
                         <?php endforeach; ?>
                     <?php else: ?>
-                        <div class="review-card bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md min-h-[240px]">
-                            <div class="flex items-center justify-between gap-4">
+                        <div class="review-card bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 shadow-md h-[360px] mb-5">
+                            <div class="flex items-center justify-between gap-4 shrink-0">
                                 <div class="flex items-center gap-3 min-w-0">
-                                    <div class="w-10 h-10 rounded-full bg-slate-200 text-[#0f2b44] flex items-center justify-center font-bold">★</div>
+                                    <div class="w-10 h-10 rounded-full bg-slate-200 text-[#0f2b44] flex items-center justify-center font-bold shrink-0">★</div>
                                     <div class="text-sm font-semibold text-slate-700 truncate">No reviews yet</div>
                                 </div>
                                 <div class="flex items-center gap-0.5 text-slate-300 whitespace-nowrap shrink-0 leading-none">
                                     <i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i><i class="fas fa-star"></i>
                                 </div>
                             </div>
-                            <p class="text-slate-700 mt-4">Be the first to leave feedback about this webinar.</p>
+                            <div class="mt-4 flex-1">
+                                <p class="text-slate-700">Be the first to leave feedback about this webinar.</p>
+                            </div>
                         </div>
                     <?php endif; ?>
                 </div>
             </div>
-            <div class="mt-10 max-w-3xl mx-auto bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 md:p-8 shadow-md">
+            <!-- <div class="mt-[70px]  max-w-3xl mx-auto bg-white/80 backdrop-blur-sm border border-slate-100 rounded-3xl p-6 md:p-8 shadow-md">
                 <h3 class="text-2xl font-bold text-slate-900 text-center">Leave a review</h3>
                 <p class="text-slate-600 text-sm text-center mt-2">Hover the stars to rate, then submit your review.</p>
                 <?php if ($reviewFlash !== ''): ?>
@@ -784,7 +927,7 @@ if ($feedbackTableReady) {
                         <button type="submit" class="bg-amber-500 hover:bg-amber-400 text-[#0f2b44] font-bold px-8 py-3 rounded-full shadow-md transition">Submit review</button>
                     </div>
                 </form>
-            </div>
+            </div> -->
 
         <!-- ========== SECTION 4.4: SECOND CTA SECTION ========== -->
         <div class="bg-[#0f2b44] text-white rounded-3xl p-10 md:p-14 shadow-2xl mt-16 mb-20">
@@ -804,9 +947,10 @@ if ($feedbackTableReady) {
                     <h2 class="text-3xl font-bold text-slate-900">Contact us</h2>
                     <p class="text-slate-600">Questions about the webinar or co‑investing with us? Reach out and our team will respond within 24h.</p>
                     <div class="space-y-3">
-                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-envelope text-amber-500"></i><span>Oscar@mioym.com</span></div>
-                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-phone text-amber-500"></i><span>914 566 9050</span></div>
-                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-map-marker-alt text-amber-500"></i><span>2900 Westchester Ave. Ste. 302 Purchase, NY 10577</span></div>
+                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-envelope text-amber-500"></i><span>Robert@mioymmequities.com</span></div>
+                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-phone text-amber-500"></i><span>Office: 914 566 8292 x 199 </span></div>
+                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-phone text-amber-500"></i><span>Mobile: 914 400 7980</span></div>
+                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-map-marker-alt text-amber-500"></i><span>2900 Westchester Ave Purchase, NY 10577</span></div>
                     </div>
                 </div>
                 <div class="space-y-4">
@@ -941,6 +1085,259 @@ if ($feedbackTableReady) {
         const videoContainer = document.getElementById('videoContainer');
         const mainVideo = document.getElementById('mainVideo');
         const previewVideo = document.getElementById('previewVideo');
+        const caseExamplesModal = document.getElementById('caseExamplesModal');
+        const caseExamplesContainer = document.getElementById('caseExamplesContainer');
+        const caseExamplesImagesGrid = document.getElementById('caseExamplesImagesGrid');
+        const caseExamplesImageA = document.getElementById('caseExamplesImageA');
+        const caseExamplesImageB = document.getElementById('caseExamplesImageB');
+        const caseExamplesCounter = document.getElementById('caseExamplesCounter');
+        const contractorPdfModal = document.getElementById('contractorPdfModal');
+        const contractorPdfContainer = document.getElementById('contractorPdfContainer');
+        const contractorPdfFrame = document.getElementById('contractorPdfFrame');
+        const contractorPdfBtn0 = document.getElementById('contractorPdfBtn0');
+        const contractorPdfBtn1 = document.getElementById('contractorPdfBtn1');
+        const contractorPdfUrls = [
+            'files/<?php echo rawurlencode('1045 Orange Street $127,201.00 Executed Scope of Work 1-6-2025.pdf'); ?>',
+            'files/<?php echo rawurlencode('General Contractor License (2025-2026).pdf'); ?>'
+        ];
+        let contractorPdfIndex = 0;
+        const statesPdfModal = document.getElementById('statesPdfModal');
+        const statesPdfContainer = document.getElementById('statesPdfContainer');
+        const statesPdfFrame = document.getElementById('statesPdfFrame');
+        const statesPdfUrl = 'files/<?php echo rawurlencode('States we buy in.pdf'); ?>';
+        const faqsPdfModal = document.getElementById('faqsPdfModal');
+        const faqsPdfContainer = document.getElementById('faqsPdfContainer');
+        const faqsPdfFrame = document.getElementById('faqsPdfFrame');
+        const faqsPdfUrl = 'files/<?php echo rawurlencode('MIOYM FAQs.pdf'); ?>';
+        const galleries = {
+            caseExamples: {
+                layout: 'single',
+                images: [
+                    'img/Screenshot%202026-03-30%20023657.png',
+                    'img/Screenshot%202026-03-30%20023729.png',
+                    'img/Screenshot%202026-03-30%20023742.png'
+                ]
+            },
+            affordableHomes: {
+                layout: 'pair',
+                images: [
+                    'img/1.png',
+                    'img/2.png',
+                    'img/3.png',
+                    'img/4.png',
+                    'img/5.png',
+                    'img/6.png'
+                ]
+            }
+        };
+        let galleryKey = 'caseExamples';
+        let galleryIndex = 0;
+
+        function renderCaseExamplesImage() {
+            if (!caseExamplesImageA || !caseExamplesCounter) return;
+            const gallery = galleries[galleryKey] || { layout: 'single', images: [] };
+            const layout = gallery.layout || 'single';
+            const images = gallery.images || [];
+
+            if (layout === 'pair') {
+                const pageCount = Math.max(Math.ceil(images.length / 2), 1);
+                const start = galleryIndex * 2;
+                const srcA = images[start] || '';
+                const srcB = images[start + 1] || '';
+                const hasB = srcB !== '';
+
+                caseExamplesImageA.src = srcA;
+                if (caseExamplesImageB) {
+                    caseExamplesImageB.src = srcB;
+                    caseExamplesImageB.classList.toggle('hidden', !hasB);
+                }
+                caseExamplesImageA.classList.toggle('md:col-span-2', !hasB);
+                caseExamplesImagesGrid?.classList.remove('md:grid-cols-1');
+                caseExamplesCounter.textContent = `${Math.min(galleryIndex + 1, pageCount)} / ${pageCount}`;
+                return;
+            }
+
+            caseExamplesImageA.src = images[galleryIndex] || '';
+            if (caseExamplesImageB) {
+                caseExamplesImageB.src = '';
+                caseExamplesImageB.classList.add('hidden');
+            }
+            caseExamplesImageA.classList.add('md:col-span-2');
+            caseExamplesImagesGrid?.classList.add('md:grid-cols-1');
+            caseExamplesCounter.textContent = `${Math.min(galleryIndex + 1, images.length)} / ${images.length}`;
+        }
+
+        function openGalleryModal(nextGalleryKey, startIndex = 0) {
+            if (!caseExamplesModal) return;
+            if (videoModal && !videoModal.classList.contains('hidden')) closeVideoModal();
+            galleryKey = nextGalleryKey;
+            const gallery = galleries[galleryKey] || { layout: 'single', images: [] };
+            const images = gallery.images || [];
+            const layout = gallery.layout || 'single';
+            const pageCount = layout === 'pair' ? Math.ceil(images.length / 2) : images.length;
+            galleryIndex = Math.min(Math.max(Number(startIndex) || 0, 0), Math.max(pageCount - 1, 0));
+            renderCaseExamplesImage();
+            caseExamplesModal.classList.remove('hidden');
+            setTimeout(() => {
+                caseExamplesModal.classList.remove('opacity-0');
+                caseExamplesContainer?.classList.remove('scale-95');
+                caseExamplesContainer?.classList.add('scale-100');
+            }, 10);
+            document.body.style.overflow = 'hidden';
+        }
+
+        function openCaseExamplesModal(startIndex = 0) {
+            openGalleryModal('caseExamples', startIndex);
+        }
+
+        function openAffordableHomesModal(startIndex = 0) {
+            openGalleryModal('affordableHomes', startIndex);
+        }
+
+        function setContractorPdf(index) {
+            if (!contractorPdfFrame) return;
+            const next = Number(index) || 0;
+            contractorPdfIndex = Math.min(Math.max(next, 0), contractorPdfUrls.length - 1);
+            contractorPdfFrame.src = contractorPdfUrls[contractorPdfIndex] || '';
+
+            const active = 'px-3 py-2 rounded-full text-sm font-semibold bg-white text-[#0f2b44] hover:bg-amber-100 transition';
+            const inactive = 'px-3 py-2 rounded-full text-sm font-semibold bg-white/10 text-white hover:bg-white/20 transition';
+            contractorPdfBtn0?.setAttribute('class', contractorPdfIndex === 0 ? active : inactive);
+            contractorPdfBtn1?.setAttribute('class', contractorPdfIndex === 1 ? active : inactive);
+        }
+
+        function openContractorPdfModal(index = 0) {
+            if (!contractorPdfModal || !contractorPdfFrame) return;
+            if (videoModal && !videoModal.classList.contains('hidden')) closeVideoModal();
+            if (caseExamplesModal && !caseExamplesModal.classList.contains('hidden')) closeCaseExamplesModal();
+            setContractorPdf(index);
+            contractorPdfModal.classList.remove('hidden');
+            setTimeout(() => {
+                contractorPdfModal.classList.remove('opacity-0');
+                contractorPdfContainer?.classList.remove('scale-95');
+                contractorPdfContainer?.classList.add('scale-100');
+            }, 10);
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeContractorPdfModal() {
+            if (!contractorPdfModal) return;
+            contractorPdfModal.classList.add('opacity-0');
+            contractorPdfContainer?.classList.remove('scale-100');
+            contractorPdfContainer?.classList.add('scale-95');
+            setTimeout(() => {
+                contractorPdfModal.classList.add('hidden');
+                if (contractorPdfFrame) contractorPdfFrame.src = '';
+            }, 300);
+            if (
+                (!videoModal || videoModal.classList.contains('hidden')) &&
+                (!caseExamplesModal || caseExamplesModal.classList.contains('hidden'))
+            ) {
+                document.body.style.overflow = '';
+            }
+        }
+
+        function openStatesPdfModal() {
+            if (!statesPdfModal || !statesPdfFrame) return;
+            if (videoModal && !videoModal.classList.contains('hidden')) closeVideoModal();
+            if (caseExamplesModal && !caseExamplesModal.classList.contains('hidden')) closeCaseExamplesModal();
+            if (contractorPdfModal && !contractorPdfModal.classList.contains('hidden')) closeContractorPdfModal();
+            statesPdfFrame.src = statesPdfUrl;
+            statesPdfModal.classList.remove('hidden');
+            setTimeout(() => {
+                statesPdfModal.classList.remove('opacity-0');
+                statesPdfContainer?.classList.remove('scale-95');
+                statesPdfContainer?.classList.add('scale-100');
+            }, 10);
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeStatesPdfModal() {
+            if (!statesPdfModal) return;
+            statesPdfModal.classList.add('opacity-0');
+            statesPdfContainer?.classList.remove('scale-100');
+            statesPdfContainer?.classList.add('scale-95');
+            setTimeout(() => {
+                statesPdfModal.classList.add('hidden');
+                if (statesPdfFrame) statesPdfFrame.src = '';
+            }, 300);
+            if (
+                (!videoModal || videoModal.classList.contains('hidden')) &&
+                (!caseExamplesModal || caseExamplesModal.classList.contains('hidden')) &&
+                (!contractorPdfModal || contractorPdfModal.classList.contains('hidden')) &&
+                (!faqsPdfModal || faqsPdfModal.classList.contains('hidden'))
+            ) {
+                document.body.style.overflow = '';
+            }
+        }
+
+        function openFaqsPdfModal() {
+            if (!faqsPdfModal || !faqsPdfFrame) return;
+            if (videoModal && !videoModal.classList.contains('hidden')) closeVideoModal();
+            if (caseExamplesModal && !caseExamplesModal.classList.contains('hidden')) closeCaseExamplesModal();
+            if (contractorPdfModal && !contractorPdfModal.classList.contains('hidden')) closeContractorPdfModal();
+            if (statesPdfModal && !statesPdfModal.classList.contains('hidden')) closeStatesPdfModal();
+            faqsPdfFrame.src = faqsPdfUrl;
+            faqsPdfModal.classList.remove('hidden');
+            setTimeout(() => {
+                faqsPdfModal.classList.remove('opacity-0');
+                faqsPdfContainer?.classList.remove('scale-95');
+                faqsPdfContainer?.classList.add('scale-100');
+            }, 10);
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeFaqsPdfModal() {
+            if (!faqsPdfModal) return;
+            faqsPdfModal.classList.add('opacity-0');
+            faqsPdfContainer?.classList.remove('scale-100');
+            faqsPdfContainer?.classList.add('scale-95');
+            setTimeout(() => {
+                faqsPdfModal.classList.add('hidden');
+                if (faqsPdfFrame) faqsPdfFrame.src = '';
+            }, 300);
+            if (
+                (!videoModal || videoModal.classList.contains('hidden')) &&
+                (!caseExamplesModal || caseExamplesModal.classList.contains('hidden')) &&
+                (!contractorPdfModal || contractorPdfModal.classList.contains('hidden')) &&
+                (!statesPdfModal || statesPdfModal.classList.contains('hidden'))
+            ) {
+                document.body.style.overflow = '';
+            }
+        }
+
+        function closeCaseExamplesModal() {
+            if (!caseExamplesModal) return;
+            caseExamplesModal.classList.add('opacity-0');
+            caseExamplesContainer?.classList.remove('scale-100');
+            caseExamplesContainer?.classList.add('scale-95');
+            setTimeout(() => {
+                caseExamplesModal.classList.add('hidden');
+            }, 300);
+            if (!videoModal || videoModal.classList.contains('hidden')) {
+                document.body.style.overflow = '';
+            }
+        }
+
+        function caseExamplesPrev() {
+            const gallery = galleries[galleryKey] || { layout: 'single', images: [] };
+            const images = gallery.images || [];
+            const layout = gallery.layout || 'single';
+            const pageCount = layout === 'pair' ? Math.ceil(images.length / 2) : images.length;
+            if (pageCount <= 1) return;
+            galleryIndex = (galleryIndex - 1 + pageCount) % pageCount;
+            renderCaseExamplesImage();
+        }
+
+        function caseExamplesNext() {
+            const gallery = galleries[galleryKey] || { layout: 'single', images: [] };
+            const images = gallery.images || [];
+            const layout = gallery.layout || 'single';
+            const pageCount = layout === 'pair' ? Math.ceil(images.length / 2) : images.length;
+            if (pageCount <= 1) return;
+            galleryIndex = (galleryIndex + 1) % pageCount;
+            renderCaseExamplesImage();
+        }
 
         function openVideoModal() {
             if (!videoModal) return;
@@ -998,8 +1395,31 @@ if ($feedbackTableReady) {
 
         // Close on escape key
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && !videoModal.classList.contains('hidden')) {
-                closeVideoModal();
+            if (e.key === 'Escape') {
+                if (faqsPdfModal && !faqsPdfModal.classList.contains('hidden')) {
+                    closeFaqsPdfModal();
+                    return;
+                }
+                if (statesPdfModal && !statesPdfModal.classList.contains('hidden')) {
+                    closeStatesPdfModal();
+                    return;
+                }
+                if (contractorPdfModal && !contractorPdfModal.classList.contains('hidden')) {
+                    closeContractorPdfModal();
+                    return;
+                }
+                if (caseExamplesModal && !caseExamplesModal.classList.contains('hidden')) {
+                    closeCaseExamplesModal();
+                    return;
+                }
+                if (videoModal && !videoModal.classList.contains('hidden')) {
+                    closeVideoModal();
+                }
+                return;
+            }
+            if (caseExamplesModal && !caseExamplesModal.classList.contains('hidden')) {
+                if (e.key === 'ArrowLeft') caseExamplesPrev();
+                if (e.key === 'ArrowRight') caseExamplesNext();
             }
         });
 
@@ -1008,6 +1428,38 @@ if ($feedbackTableReady) {
             videoModal.addEventListener('click', (e) => {
                 if (e.target === videoModal) {
                     closeVideoModal();
+                }
+            });
+        }
+
+        if (caseExamplesModal) {
+            caseExamplesModal.addEventListener('click', (e) => {
+                if (e.target === caseExamplesModal) {
+                    closeCaseExamplesModal();
+                }
+            });
+        }
+
+        if (contractorPdfModal) {
+            contractorPdfModal.addEventListener('click', (e) => {
+                if (e.target === contractorPdfModal) {
+                    closeContractorPdfModal();
+                }
+            });
+        }
+
+        if (statesPdfModal) {
+            statesPdfModal.addEventListener('click', (e) => {
+                if (e.target === statesPdfModal) {
+                    closeStatesPdfModal();
+                }
+            });
+        }
+
+        if (faqsPdfModal) {
+            faqsPdfModal.addEventListener('click', (e) => {
+                if (e.target === faqsPdfModal) {
+                    closeFaqsPdfModal();
                 }
             });
         }
