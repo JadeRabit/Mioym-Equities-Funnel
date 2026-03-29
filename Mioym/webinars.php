@@ -632,6 +632,37 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     </div>
 
+    <div id="uploadProgressOverlay" class="fixed inset-0 z-[260] hidden">
+        <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="w-full max-w-md bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-3xl shadow-[0_24px_64px_rgba(2,6,23,0.45)] border border-slate-200/70 dark:border-slate-800/60 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <div class="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 flex items-center justify-center shrink-0">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <div class="text-sm font-extrabold tracking-tight truncate">Uploading…</div>
+                            <div id="uploadProgressSub" class="text-xs text-slate-500 dark:text-slate-400 truncate">Please keep this tab open.</div>
+                        </div>
+                    </div>
+                    <button type="button" id="uploadProgressCancel" class="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-slate-900/60 hover:bg-slate-50 dark:hover:bg-slate-800 transition shadow-sm text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        Cancel
+                    </button>
+                </div>
+                <div class="px-6 py-5">
+                    <div class="flex items-center justify-between gap-3">
+                        <div id="uploadProgressLabel" class="text-sm font-semibold text-slate-700 dark:text-slate-200">0%</div>
+                        <div id="uploadProgressBytes" class="text-xs text-slate-500 dark:text-slate-400"></div>
+                    </div>
+                    <div class="mt-3 w-full h-2.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div id="uploadProgressBar" class="h-full bg-gradient-to-r from-blue-500 to-emerald-500 rounded-full" style="width:0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
     // Modal functionality using vanilla JavaScript
     document.addEventListener('DOMContentLoaded', function() {
@@ -848,6 +879,154 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
         });
       });
     })();
+    </script>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        const overlay = document.getElementById('uploadProgressOverlay');
+        const bar = document.getElementById('uploadProgressBar');
+        const label = document.getElementById('uploadProgressLabel');
+        const bytes = document.getElementById('uploadProgressBytes');
+        const sub = document.getElementById('uploadProgressSub');
+        const cancelBtn = document.getElementById('uploadProgressCancel');
+
+        if (!overlay || !bar || !label || !bytes || !sub || !cancelBtn) return;
+
+        let xhr = null;
+        let locked = false;
+        let activeFormId = null;
+
+        function formatBytes(n) {
+          const v = Number(n || 0);
+          if (!isFinite(v) || v <= 0) return '0 B';
+          const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+          const i = Math.min(units.length - 1, Math.floor(Math.log(v) / Math.log(1024)));
+          const val = v / Math.pow(1024, i);
+          return (i === 0 ? String(Math.round(val)) : val.toFixed(1)) + ' ' + units[i];
+        }
+
+        function setSubmitting(formId, isSubmitting) {
+          if (!formId) return;
+          const selector = `button[type="submit"][form="${formId}"], #${formId} button[type="submit"]`;
+          document.querySelectorAll(selector).forEach(btn => {
+            btn.disabled = isSubmitting;
+          });
+        }
+
+        function show() {
+          overlay.classList.remove('hidden');
+          document.body.style.overflow = 'hidden';
+        }
+
+        function hide() {
+          overlay.classList.add('hidden');
+          document.body.style.overflow = '';
+          if (activeFormId) setSubmitting(activeFormId, false);
+          activeFormId = null;
+          locked = false;
+          xhr = null;
+        }
+
+        function setProgress(pct, loaded, total) {
+          const clamped = Math.max(0, Math.min(100, pct));
+          bar.style.width = clamped + '%';
+          label.textContent = Math.round(clamped) + '%';
+          if (typeof loaded === 'number' && typeof total === 'number' && total > 0) {
+            bytes.textContent = `${formatBytes(loaded)} / ${formatBytes(total)}`;
+          } else {
+            bytes.textContent = '';
+          }
+        }
+
+        function setMode(mode, message) {
+          if (mode === 'uploading') {
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.disabled = false;
+            sub.textContent = message || 'Please keep this tab open.';
+          } else if (mode === 'finalizing') {
+            cancelBtn.textContent = 'Close';
+            cancelBtn.disabled = true;
+            sub.textContent = message || 'Finalizing…';
+          } else if (mode === 'error') {
+            cancelBtn.textContent = 'Close';
+            cancelBtn.disabled = false;
+            sub.textContent = message || 'Upload failed. Please try again.';
+          } else if (mode === 'cancelled') {
+            cancelBtn.textContent = 'Close';
+            cancelBtn.disabled = false;
+            sub.textContent = message || 'Upload cancelled.';
+          }
+        }
+
+        cancelBtn.addEventListener('click', () => {
+          if (cancelBtn.textContent.trim() === 'Close') {
+            hide();
+            return;
+          }
+          if (xhr) {
+            xhr.abort();
+          } else {
+            hide();
+          }
+        });
+
+        function uploadForm(form, formId) {
+          xhr = new XMLHttpRequest();
+          activeFormId = formId;
+          setSubmitting(formId, true);
+          setProgress(0, 0, 0);
+          setMode('uploading');
+          show();
+
+          xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+              setProgress((e.loaded / e.total) * 100, e.loaded, e.total);
+            } else {
+              setProgress(0, 0, 0);
+            }
+          });
+
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 400) {
+              setProgress(100, 1, 1);
+              setMode('finalizing', 'Finishing up…');
+              window.location.reload();
+              return;
+            }
+            setMode('error');
+            setSubmitting(formId, false);
+          });
+
+          xhr.addEventListener('error', () => {
+            setMode('error');
+            setSubmitting(formId, false);
+          });
+
+          xhr.addEventListener('abort', () => {
+            setMode('cancelled');
+            setSubmitting(formId, false);
+          });
+
+          xhr.open('POST', form.getAttribute('action') || window.location.href, true);
+          xhr.send(new FormData(form));
+        }
+
+        function wireForm(formId) {
+          const form = document.getElementById(formId);
+          if (!form) return;
+          form.addEventListener('submit', (e) => {
+            const hasFiles = Array.from(form.querySelectorAll('input[type="file"]')).some(i => i.files && i.files.length > 0);
+            if (!hasFiles) return;
+            if (locked) { e.preventDefault(); return; }
+            locked = true;
+            e.preventDefault();
+            uploadForm(form, formId);
+          });
+        }
+
+        wireForm('addWebinarForm');
+        wireForm('editWebinarForm');
+      });
     </script>
 
 </body>

@@ -84,7 +84,7 @@ $rangeWhereSql = "registration_date >= DATE_SUB(CURDATE(), INTERVAL " . ($rangeD
 // Summary KPIs
 $totalRegistrants = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE $rangeWhereSql")->fetchColumn();
 $totalEmailsSent = (int)$pdo->query("SELECT COUNT(*) FROM registrants_tbl WHERE email_sent = 1 AND $rangeWhereSql")->fetchColumn();
-$webinarsCount = (int)$pdo->query("SELECT COUNT(*) FROM webinar_tbl WHERE LOWER(COALESCE(status,'')) IN ('active','upcoming','live') AND `schedule_date&time` >= NOW() AND `schedule_date&time` < DATE_ADD(NOW(), INTERVAL " . $rangeDays . " DAY)")->fetchColumn();
+$webinarsCount = (int)$pdo->query("SELECT COUNT(*) FROM webinar_tbl WHERE LOWER(COALESCE(status,'')) IN ('active','live')")->fetchColumn();
 
 // Fetch Recent Webinars
 $recentWebinars = $pdo->query("
@@ -128,13 +128,13 @@ $emailsTrend = ($emailsTrendVal >= 0 ? '+' : '') . number_format($emailsTrendVal
 // Webinars: upcoming next range vs previous range
 $currentWebinars30 = (int)$pdo->query("
     SELECT COUNT(*) FROM webinar_tbl 
-    WHERE LOWER(COALESCE(status,'')) IN ('active','upcoming','live')
+    WHERE LOWER(COALESCE(status,'')) IN ('active','live')
       AND `schedule_date&time` >= NOW()
       AND `schedule_date&time` < DATE_ADD(NOW(), INTERVAL " . $rangeDays . " DAY)
 ")->fetchColumn();
 $previousWebinars30 = (int)$pdo->query("
     SELECT COUNT(*) FROM webinar_tbl 
-    WHERE LOWER(COALESCE(status,'')) IN ('active','upcoming','live')
+    WHERE LOWER(COALESCE(status,'')) IN ('active','live')
       AND `schedule_date&time` >= DATE_SUB(NOW(), INTERVAL " . $rangeDays . " DAY)
       AND `schedule_date&time` < NOW()
 ")->fetchColumn();

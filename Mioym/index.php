@@ -522,18 +522,21 @@ if ($feedbackTableReady) {
     <?php endif; ?>
 
     <!-- ========== SECTION 4: MAIN CONTENT AREA ========== -->
-    <div class="max-w-6xl mx-auto px-5 sm:px-8 py-6 md:py-8">
+    <div class=" w-full border-b border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
+    <div class="max-w-6xl mx-auto py-4 md:py-5">
 
         <!-- ========== SECTION 4.1: HEADER ========== -->
         <div class="flex justify-between items-center">
-            <div class="flex items-center gap-2">
-                <div class="bg-[#0f2b44] text-white w-9 h-9 rounded-lg flex items-center justify-center text-xl font-semibold">M◈</div>
-                <span class="font-medium text-slate-600">mioym equities</span>
+            <div class="flex items-center">
+                <div class=" bg-[#0f2b44] text-white w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-full ring-1 ring-white/15 shadow-lg flex items-center justify-center overflow-hidden">
+                    <img src="img/MIOYM_logo.png" alt="Mioym Group" class="w-full h-full object-contain p-2">
+                </div>
             </div>
-            <span class="text-sm bg-white border border-slate-200 px-4 py-2 rounded-full shadow-sm">
-                <i class="far fa-calendar-alt text-amber-500 mr-1"></i> <?php echo htmlspecialchars($scheduleDate); ?>
+            <span class="inline-flex items-center gap-2 text-xs sm:text-sm bg-[#0f2b44] text-white border border-white/15 px-3 sm:px-4 py-2 rounded-full shadow-sm backdrop-blur">
+                <i class="far fa-calendar-alt text-amber-300"></i> <?php echo htmlspecialchars($scheduleDate); ?>
             </span>
         </div>
+    </div>
     </div>
 
         <!-- ========== SECTION 4.2: HERO SECTION - WALANG EXTRANG CONTAINER, BACKGROUND LANG ========== -->
@@ -557,13 +560,39 @@ if ($feedbackTableReady) {
                     </p>
                     <?php if (!empty($webinarDescriptionBullets)): ?>
                     <ul class="mt-8 space-y-3">
-                        <?php foreach ($webinarDescriptionBullets as $line): ?>
-                            <?php $clean = ltrim($line, "•- \t"); ?>
+                        <?php
+                            $__bullets = array_values($webinarDescriptionBullets);
+                            $__first = $__bullets[0] ?? null;
+                            $__rest = array_slice($__bullets, 1);
+                        ?>
+                        <?php if ($__first !== null): ?>
+                            <?php $__cleanFirst = ltrim($__first, "•- \t"); ?>
                             <li class="flex items-start gap-3">
+                                <i class="fas fa-check-circle text-amber-400 text-xl mt-0.5"></i>
+                                <span class="text-slate-100">
+                                    <?php echo htmlspecialchars($__cleanFirst); ?>
+                                    <?php if (!empty($__rest)): ?>
+                                        <button type="button" data-model-expand aria-expanded="false" class="ml-2 text-amber-300 hover:text-amber-200 underline underline-offset-4 font-semibold">
+                                            Read more ...
+                                        </button>
+                                    <?php endif; ?>
+                                </span>
+                            </li>
+                        <?php endif; ?>
+                        <?php foreach ($__rest as $line): ?>
+                            <?php $clean = ltrim($line, "•- \t"); ?>
+                            <li class="flex items-start gap-3 hidden" data-model-detail>
                                 <i class="fas fa-check-circle text-amber-400 text-xl mt-0.5"></i>
                                 <span class="text-slate-100"><?php echo htmlspecialchars($clean); ?></span>
                             </li>
                         <?php endforeach; ?>
+                        <?php if (!empty($__rest)): ?>
+                            <li class="hidden pt-1" data-model-collapse-row>
+                                <button type="button" data-model-collapse class="text-amber-300 hover:text-amber-200 underline underline-offset-4 font-semibold">
+                                    Read less
+                                </button>
+                            </li>
+                        <?php endif; ?>
                     </ul>
                     <?php endif; ?>
                     <div class="flex flex-wrap items-center gap-4 mt-10">
@@ -826,6 +855,26 @@ if ($feedbackTableReady) {
                 alert('This is a demo placeholder.');
             });
         });
+        (() => {
+            const expandBtn = document.querySelector('[data-model-expand]');
+            if (!expandBtn) return;
+            const ul = expandBtn.closest('ul');
+            if (!ul) return;
+            const details = Array.from(ul.querySelectorAll('[data-model-detail]'));
+            if (details.length === 0) return;
+            const collapseRow = ul.querySelector('[data-model-collapse-row]');
+            const collapseBtn = ul.querySelector('[data-model-collapse]');
+
+            const setExpanded = (expanded) => {
+                details.forEach(li => li.classList.toggle('hidden', !expanded));
+                if (collapseRow) collapseRow.classList.toggle('hidden', !expanded);
+                expandBtn.classList.toggle('hidden', expanded);
+                expandBtn.setAttribute('aria-expanded', String(expanded));
+            };
+
+            expandBtn.addEventListener('click', () => setExpanded(true));
+            collapseBtn?.addEventListener('click', () => setExpanded(false));
+        })();
         (() => {
             const carousel = document.getElementById('reviewsCarousel');
             if (!carousel) return;
