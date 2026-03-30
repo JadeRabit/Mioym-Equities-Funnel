@@ -984,7 +984,7 @@ if ($feedbackTableReady) {
         <!-- ========== SECTION 4.4: SECOND CTA SECTION ========== -->
         <div class="bg-[#0f2b44] text-white rounded-3xl p-10 md:p-14 shadow-2xl mt-16 mb-20">
             <div class="max-w-3xl mx-auto text-center">
-                <h2 class="text-3xl md:text-4xl font-bold mb-4"><?php echo htmlspecialchars($webinarTitle); ?></h2>
+                <h2 class="text-3xl md:text-4xl font-bold mb-4">Reserve your virtual seat now</h2>
                 <p class="text-lg text-slate-300 mb-8"><?php echo htmlspecialchars($scheduleDate); ?> · free live stream + replay</p>
                 <a href="registration.php" class="inline-flex items-center gap-3 bg-amber-400 hover:bg-amber-300 text-[#0f2b44] font-bold text-xl px-10 py-5 rounded-full shadow-xl transition transform hover:scale-105">
                     <i class="fas fa-ticket-alt"></i> Register now — it's free
@@ -1049,7 +1049,7 @@ if ($feedbackTableReady) {
             link.addEventListener('click', (e) => {
                 e.preventDefault();
                 alert('This is a demo placeholder.');
-            });
+            });0
         });
         (() => {
             const expandBtn = document.querySelector('[data-model-expand]');
