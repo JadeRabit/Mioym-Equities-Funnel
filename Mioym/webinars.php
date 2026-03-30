@@ -26,11 +26,43 @@ if (!$hasDescription) {
     }
 }
 
-    $hasSubheading = true;
+$hasHostDescription = true;
+try {
+    $pdo->query("SELECT host_description FROM webinar_tbl LIMIT 1");
+} catch (Throwable $e) {
+    $hasHostDescription = false;
+}
+if (!$hasHostDescription) {
+    try {
+        $pdo->exec("ALTER TABLE webinar_tbl ADD COLUMN host_description TEXT NULL");
+    } catch (Throwable $e) {
+    }
+    try {
+        $pdo->query("SELECT host_description FROM webinar_tbl LIMIT 1");
+        $hasHostDescription = true;
+    } catch (Throwable $e) {
+        $hasHostDescription = false;
+    }
+}
+
+$hasSubheading = true;
 try {
     $pdo->query("SELECT subheading, subheading_size, subheading_bold FROM webinar_tbl LIMIT 1");
 } catch (Throwable $e) {
     $hasSubheading = false;
+}
+// Optional color column
+$hasSubheadingColor = true;
+try {
+    $pdo->query("SELECT subheading_color FROM webinar_tbl LIMIT 1");
+} catch (Throwable $e) {
+    $hasSubheadingColor = false;
+}
+$hasSubheadingItemsJson = true;
+try {
+    $pdo->query("SELECT subheading_items_json FROM webinar_tbl LIMIT 1");
+} catch (Throwable $e) {
+    $hasSubheadingItemsJson = false;
 }
 if (!$hasSubheading) {
     try {
@@ -50,6 +82,24 @@ if (!$hasSubheading) {
         $hasSubheading = true;
     } catch (Throwable $e) {
         $hasSubheading = false;
+    }
+}
+if (!$hasSubheadingColor) {
+    try { $pdo->exec("ALTER TABLE webinar_tbl ADD COLUMN subheading_color VARCHAR(16) NULL DEFAULT '#ffffff'"); } catch (Throwable $e) {}
+    try {
+        $pdo->query("SELECT subheading_color FROM webinar_tbl LIMIT 1");
+        $hasSubheadingColor = true;
+    } catch (Throwable $e) {
+        $hasSubheadingColor = false;
+    }
+}
+if (!$hasSubheadingItemsJson) {
+    try { $pdo->exec("ALTER TABLE webinar_tbl ADD COLUMN subheading_items_json LONGTEXT NULL"); } catch (Throwable $e) {}
+    try {
+        $pdo->query("SELECT subheading_items_json FROM webinar_tbl LIMIT 1");
+        $hasSubheadingItemsJson = true;
+    } catch (Throwable $e) {
+        $hasSubheadingItemsJson = false;
     }
 }
 
@@ -76,11 +126,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $new_webinar_id = 'WB-' . mt_rand(10000, 99999);
         $status = $_POST['status'] ?? 'active';
         $description = trim($_POST['description'] ?? '');
+        $hostDescription = trim($_POST['host_description'] ?? '');
         $subheading = trim($_POST['subheading'] ?? '');
         $subheadingSize = (int)($_POST['subheading_size'] ?? 20);
         if ($subheadingSize < 10) $subheadingSize = 10;
         if ($subheadingSize > 80) $subheadingSize = 80;
         $subheadingBold = isset($_POST['subheading_bold']) ? 1 : 0;
+        $subheadingColor = trim((string)($_POST['subheading_color'] ?? '#ffffff'));
+        if (!preg_match('/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/', $subheadingColor)) $subheadingColor = '#ffffff';
+        if ($subheadingColor !== '' && $subheadingColor[0] !== '#') $subheadingColor = '#' . $subheadingColor;
+        $subheadingItemsJson = trim((string)($_POST['subheading_items_json'] ?? ''));
+        $subheadingItems = [];
+        if ($subheadingItemsJson !== '') {
+            $decoded = json_decode($subheadingItemsJson, true);
+            if (is_array($decoded)) $subheadingItems = $decoded;
+        }
+        $allowedFonts = ['system_sans','system_serif','system_mono','arial','georgia','times','courier','verdana','trebuchet'];
+        $cleanItems = [];
+        foreach ($subheadingItems as $it) {
+            if (!is_array($it)) continue;
+            $text = trim((string)($it['text'] ?? ''));
+            if ($text === '') continue;
+            $size = (int)($it['size'] ?? 20);
+            if ($size < 10) $size = 10;
+            if ($size > 80) $size = 80;
+            $color = trim((string)($it['color'] ?? '#ffffff'));
+            if (!preg_match('/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/', $color)) $color = '#ffffff';
+            if ($color !== '' && $color[0] !== '#') $color = '#' . $color;
+            $bold = !empty($it['bold']) ? 1 : 0;
+            $font = (string)($it['font'] ?? 'system_sans');
+            if (!in_array($font, $allowedFonts, true)) $font = 'system_sans';
+            $cleanItems[] = ['text' => $text, 'size' => $size, 'color' => $color, 'bold' => $bold, 'font' => $font];
+            if (count($cleanItems) >= 12) break;
+        }
+        if (!empty($cleanItems)) {
+            $subheading = implode("\n", array_map(static fn ($x) => (string)$x['text'], $cleanItems));
+            $subheadingSize = (int)$cleanItems[0]['size'];
+            $subheadingColor = (string)$cleanItems[0]['color'];
+            $subheadingBold = (int)$cleanItems[0]['bold'];
+        }
+        $finalSubheadingItemsJson = !empty($cleanItems) ? json_encode($cleanItems, JSON_UNESCAPED_UNICODE) : null;
         
         $host_pic_path = handleUpload('host_pic');
         $webinar_vid_path = handleUpload('webinar_vid');
@@ -92,6 +177,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             array_splice($columns, 1, 0, ['description']);
             array_splice($values, 1, 0, [$description]);
         }
+        if ($hasHostDescription) {
+            $idx = array_search('hostname', $columns, true);
+            $v = $hostDescription !== '' ? $hostDescription : null;
+            if ($idx !== false) {
+                array_splice($columns, $idx + 1, 0, ['host_description']);
+                array_splice($values, $idx + 1, 0, [$v]);
+            } else {
+                $columns[] = 'host_description';
+                $values[] = $v;
+            }
+        }
         if ($hasSubheading) {
             $columns[] = 'subheading';
             $columns[] = 'subheading_size';
@@ -99,6 +195,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $values[] = $subheading !== '' ? $subheading : null;
             $values[] = $subheadingSize;
             $values[] = $subheadingBold;
+        }
+        if ($hasSubheadingColor) {
+            $columns[] = 'subheading_color';
+            $values[] = $subheadingColor;
+        }
+        if ($hasSubheadingItemsJson) {
+            $columns[] = 'subheading_items_json';
+            $values[] = $finalSubheadingItemsJson;
         }
 
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
@@ -139,11 +243,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         
         // Build update query dynamically based on whether files were uploaded
         $description = trim($_POST['description'] ?? '');
+        $hostDescription = trim($_POST['host_description'] ?? '');
         $subheading = trim($_POST['subheading'] ?? '');
         $subheadingSize = (int)($_POST['subheading_size'] ?? 20);
         if ($subheadingSize < 10) $subheadingSize = 10;
         if ($subheadingSize > 80) $subheadingSize = 80;
         $subheadingBold = isset($_POST['subheading_bold']) ? 1 : 0;
+        $subheadingColor = trim((string)($_POST['subheading_color'] ?? '#ffffff'));
+        if (!preg_match('/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/', $subheadingColor)) $subheadingColor = '#ffffff';
+        if ($subheadingColor !== '' && $subheadingColor[0] !== '#') $subheadingColor = '#' . $subheadingColor;
+        $subheadingItemsJson = trim((string)($_POST['subheading_items_json'] ?? ''));
+        $subheadingItems = [];
+        if ($subheadingItemsJson !== '') {
+            $decoded = json_decode($subheadingItemsJson, true);
+            if (is_array($decoded)) $subheadingItems = $decoded;
+        }
+        $allowedFonts = ['system_sans','system_serif','system_mono','arial','georgia','times','courier','verdana','trebuchet'];
+        $cleanItems = [];
+        foreach ($subheadingItems as $it) {
+            if (!is_array($it)) continue;
+            $text = trim((string)($it['text'] ?? ''));
+            if ($text === '') continue;
+            $size = (int)($it['size'] ?? 20);
+            if ($size < 10) $size = 10;
+            if ($size > 80) $size = 80;
+            $color = trim((string)($it['color'] ?? '#ffffff'));
+            if (!preg_match('/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/', $color)) $color = '#ffffff';
+            if ($color !== '' && $color[0] !== '#') $color = '#' . $color;
+            $bold = !empty($it['bold']) ? 1 : 0;
+            $font = (string)($it['font'] ?? 'system_sans');
+            if (!in_array($font, $allowedFonts, true)) $font = 'system_sans';
+            $cleanItems[] = ['text' => $text, 'size' => $size, 'color' => $color, 'bold' => $bold, 'font' => $font];
+            if (count($cleanItems) >= 12) break;
+        }
+        if (!empty($cleanItems)) {
+            $subheading = implode("\n", array_map(static fn ($x) => (string)$x['text'], $cleanItems));
+            $subheadingSize = (int)$cleanItems[0]['size'];
+            $subheadingColor = (string)$cleanItems[0]['color'];
+            $subheadingBold = (int)$cleanItems[0]['bold'];
+        }
+        $finalSubheadingItemsJson = !empty($cleanItems) ? json_encode($cleanItems, JSON_UNESCAPED_UNICODE) : null;
         if ($hasDescription) {
             $updateQuery = "UPDATE webinar_tbl SET title=?, description=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?";
             $params = [$_POST['title'], $description, $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status']];
@@ -151,12 +290,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $updateQuery = "UPDATE webinar_tbl SET title=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?";
             $params = [$_POST['title'], $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status']];
         }
+        if ($hasHostDescription) {
+            $updateQuery .= ", host_description=?";
+            $params[] = $hostDescription !== '' ? $hostDescription : null;
+        }
 
         if ($hasSubheading) {
             $updateQuery .= ", subheading=?, subheading_size=?, subheading_bold=?";
             $params[] = $subheading !== '' ? $subheading : null;
             $params[] = $subheadingSize;
             $params[] = $subheadingBold;
+        }
+        if ($hasSubheadingColor) {
+            $updateQuery .= ", subheading_color=?";
+            $params[] = $subheadingColor;
+        }
+        if ($hasSubheadingItemsJson) {
+            $updateQuery .= ", subheading_items_json=?";
+            $params[] = $finalSubheadingItemsJson;
         }
         
         if ($host_pic_path) {
@@ -216,6 +367,22 @@ $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
 $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 $stmt->execute();
 $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+function webinar_subheading_font_stack($key) {
+    $key = (string)$key;
+    $map = [
+        'system_sans' => "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+        'system_serif' => "ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif",
+        'system_mono' => "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+        'arial' => "Arial, Helvetica, sans-serif",
+        'georgia' => "Georgia, Cambria, 'Times New Roman', Times, serif",
+        'times' => "'Times New Roman', Times, serif",
+        'courier' => "'Courier New', Courier, monospace",
+        'verdana' => "Verdana, Geneva, sans-serif",
+        'trebuchet' => "'Trebuchet MS', 'Segoe UI', sans-serif"
+    ];
+    return $map[$key] ?? $map['system_sans'];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -307,6 +474,57 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                     </span>
                                                     <span class="text-slate-600 group-hover:text-indigo-600 transition-colors font-medium"><?php echo htmlspecialchars($w['hostname'] ?? 'No Host'); ?></span>
                                                 </div>
+                                                <?php if (!empty($w['host_description'])): ?>
+                                                    <div class="mt-1 text-xs text-slate-500 line-clamp-2 max-w-md">
+                                                        <?php echo htmlspecialchars((string)$w['host_description']); ?>
+                                                    </div>
+                                                <?php endif; ?>
+                                                <?php
+                                                    $subPreview = [];
+                                                    $rawJson = (string)($w['subheading_items_json'] ?? '');
+                                                    if ($rawJson !== '') {
+                                                        $decoded = json_decode($rawJson, true);
+                                                        if (is_array($decoded)) $subPreview = $decoded;
+                                                    }
+                                                    if (empty($subPreview)) {
+                                                        $rawText = trim((string)($w['subheading'] ?? ''));
+                                                        if ($rawText !== '') {
+                                                            $lines = preg_split("/\r\n|\r|\n/", $rawText);
+                                                            $lines = array_values(array_filter(array_map('trim', $lines), static fn ($l) => $l !== ''));
+                                                            foreach ($lines as $ln) {
+                                                                $subPreview[] = [
+                                                                    'text' => $ln,
+                                                                    'size' => (int)($w['subheading_size'] ?? 16),
+                                                                    'color' => (string)($w['subheading_color'] ?? '#475569'),
+                                                                    'bold' => (int)($w['subheading_bold'] ?? 0),
+                                                                    'font' => 'system_sans'
+                                                                ];
+                                                            }
+                                                        }
+                                                    }
+                                                    $subPreview = array_slice($subPreview, 0, 2);
+                                                ?>
+                                                <?php if (!empty($subPreview)): ?>
+                                                    <div class="mt-2 space-y-1 max-w-md">
+                                                        <?php foreach ($subPreview as $it): ?>
+                                                            <?php
+                                                                $t = trim((string)($it['text'] ?? ''));
+                                                                if ($t === '') continue;
+                                                                $sz = (int)($it['size'] ?? 16);
+                                                                if ($sz < 10) $sz = 10;
+                                                                if ($sz > 18) $sz = 18;
+                                                                $col = trim((string)($it['color'] ?? '#475569'));
+                                                                if (!preg_match('/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/', $col)) $col = '#475569';
+                                                                if ($col !== '' && $col[0] !== '#') $col = '#' . $col;
+                                                                $bold = !empty($it['bold']) ? 700 : 500;
+                                                                $fontKey = (string)($it['font'] ?? 'system_sans');
+                                                            ?>
+                                                            <div class="text-xs leading-snug line-clamp-1" style="font-size: <?php echo (int)$sz; ?>px; font-weight: <?php echo (int)$bold; ?>; color: <?php echo htmlspecialchars($col); ?>; font-family: <?php echo htmlspecialchars(webinar_subheading_font_stack($fontKey)); ?>;">
+                                                                <?php echo htmlspecialchars($t); ?>
+                                                            </div>
+                                                        <?php endforeach; ?>
+                                                    </div>
+                                                <?php endif; ?>
                                             </div>
                                         </div>
                                     </td>
@@ -383,7 +601,10 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                 data-subheading="<?php echo htmlspecialchars($w['subheading'] ?? ''); ?>"
                                                 data-subheading-size="<?php echo htmlspecialchars((string)($w['subheading_size'] ?? 20)); ?>"
                                                 data-subheading-bold="<?php echo htmlspecialchars((string)($w['subheading_bold'] ?? 1)); ?>"
+                                                data-subheading-color="<?php echo htmlspecialchars((string)($w['subheading_color'] ?? '#ffffff')); ?>"
+                                                data-subheading-items-json="<?php echo htmlspecialchars((string)($w['subheading_items_json'] ?? '')); ?>"
                                                 data-hostname="<?php echo htmlspecialchars($w['hostname'] ?? ''); ?>"
+                                                data-host-description="<?php echo htmlspecialchars((string)($w['host_description'] ?? '')); ?>"
                                                 data-host-pic="<?php echo htmlspecialchars(str_replace('\\', '/', $w['host_pic'] ?? '')); ?>"
                                                 data-webinar-vid="<?php echo htmlspecialchars(str_replace('\\', '/', $w['webinar_vid'] ?? '')); ?>"
                                                 data-schedule="<?php echo date('Y-m-d\\TH:i', strtotime($w['schedule_date&time'])); ?>"
@@ -495,20 +716,48 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                 </div>
 
                                                 <div>
-                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Subheading</label>
-                                                    <textarea name="subheading" rows="2" placeholder="Optional subheading (supports line breaks)" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400 resize-none"></textarea>
-                                                    <div class="mt-3 grid grid-cols-2 gap-4">
-                                                        <div>
-                                                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Font Size (px)</label>
-                                                            <input type="number" name="subheading_size" value="20" min="10" max="80" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800">
-                                                        </div>
-                                                        <div class="flex items-end">
-                                                            <label class="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
-                                                                <input type="checkbox" name="subheading_bold" value="1" checked class="w-4 h-4 rounded border-slate-300 text-[#1e4a7a] focus:ring-[#1e4a7a]/30">
-                                                                Bold
-                                                            </label>
+                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Subheadings</label>
+                                                    <input type="hidden" name="subheading" id="addSubheadingHidden">
+                                                    <input type="hidden" name="subheading_items_json" id="addSubheadingItemsJson">
+                                                    <div id="addSubheadingItems" class="space-y-3">
+                                                        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 subheading-item">
+                                                            <input type="text" class="subheading-item-text w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] outline-none text-sm text-slate-800 placeholder-slate-400" placeholder="Enter subheading">
+                                                            <div class="mt-3 grid grid-cols-1 sm:grid-cols-5 gap-3">
+                                                                <div class="sm:col-span-2">
+                                                                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Font</label>
+                                                                    <select class="subheading-item-font w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] outline-none text-sm text-slate-800">
+                                                                        <option value="system_sans">System Sans</option>
+                                                                        <option value="system_serif">System Serif</option>
+                                                                        <option value="system_mono">System Mono</option>
+                                                                        <option value="arial">Arial</option>
+                                                                        <option value="georgia">Georgia</option>
+                                                                        <option value="times">Times New Roman</option>
+                                                                        <option value="courier">Courier New</option>
+                                                                        <option value="verdana">Verdana</option>
+                                                                        <option value="trebuchet">Trebuchet MS</option>
+                                                                    </select>
+                                                                </div>
+                                                                <div>
+                                                                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Size</label>
+                                                                    <input type="number" min="10" max="80" value="20" class="subheading-item-size w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] outline-none text-sm text-slate-800">
+                                                                </div>
+                                                                <div>
+                                                                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Color</label>
+                                                                    <input type="color" value="#ffffff" class="subheading-item-color w-full h-[42px] px-2 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a]">
+                                                                </div>
+                                                                <div class="flex items-end justify-between gap-2">
+                                                                    <label class="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
+                                                                        <input type="checkbox" class="subheading-item-bold w-4 h-4 rounded border-slate-300 text-[#1e4a7a] focus:ring-[#1e4a7a]/30" checked>
+                                                                        Bold
+                                                                    </label>
+                                                                    <button type="button" class="subheading-item-remove px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" data-sub-item-remove disabled>Remove</button>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     </div>
+                                                    <button type="button" class="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition" data-sub-item-add>
+                                                        + Add subheading
+                                                    </button>
                                                 </div>
 
                                                 <div>
@@ -556,6 +805,10 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                                         </div>
                                                         <input type="text" name="hostname" placeholder="John Doe" class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400">
                                                     </div>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Host Description</label>
+                                                    <textarea name="host_description" rows="3" placeholder="Short bio or host description..." class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400 resize-none"></textarea>
                                                 </div>
 
                                                 <div>
@@ -649,20 +902,13 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             <p class="text-xs text-slate-400 mt-1">Use a clear, concise title to help attendees identify your event</p>
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Subheading</label>
-                            <textarea name="subheading" id="modalSubheading" rows="2" class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition resize-none" placeholder="Optional subheading (supports line breaks)"></textarea>
-                            <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Font Size (px)</label>
-                                    <input type="number" name="subheading_size" id="modalSubheadingSize" min="10" max="80" class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition" value="20">
-                                </div>
-                                <div class="flex items-end">
-                                    <label class="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
-                                        <input type="checkbox" name="subheading_bold" id="modalSubheadingBold" value="1" class="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/30">
-                                        Bold
-                                    </label>
-                                </div>
-                            </div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Subheadings</label>
+                            <input type="hidden" name="subheading" id="modalSubheadingHidden">
+                            <input type="hidden" name="subheading_items_json" id="modalSubheadingItemsJson">
+                            <div id="modalSubheadingItems" class="space-y-3"></div>
+                            <button type="button" class="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition" data-sub-item-add>
+                                + Add subheading
+                            </button>
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Description</label>
@@ -683,6 +929,10 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     <a id="hostPicLink" target="_blank" class="text-xs text-blue-600 hover:underline">View Current Image</a>
                                 </div>
                             </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Host Description</label>
+                            <textarea name="host_description" id="modalHostDescription" rows="3" class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition resize-none" placeholder="Short bio or host description"></textarea>
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Webinar Video</label>
@@ -814,13 +1064,30 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
             document.getElementById('modalWebinarId').value = button.dataset.id;
             document.getElementById('modalTitle').value = button.dataset.title;
             document.getElementById('modalDescription').value = button.dataset.description || '';
-            const subheadingField = document.getElementById('modalSubheading');
-            const subheadingSizeField = document.getElementById('modalSubheadingSize');
-            const subheadingBoldField = document.getElementById('modalSubheadingBold');
-            if (subheadingField) subheadingField.value = button.dataset.subheading || '';
-            if (subheadingSizeField) subheadingSizeField.value = button.dataset.subheadingSize || '20';
-            if (subheadingBoldField) subheadingBoldField.checked = (button.dataset.subheadingBold || '1') === '1';
+            let items = [];
+            const rawItems = button.dataset.subheadingItemsJson || '';
+            if (rawItems) {
+                try {
+                    const parsed = JSON.parse(rawItems);
+                    if (Array.isArray(parsed)) items = parsed;
+                } catch (e) {
+                    items = [];
+                }
+            }
+            if (!items.length) {
+                const raw = (button.dataset.subheading || '').toString();
+                const lines = raw.split(/\r\n|\r|\n/).map(s => s.trim()).filter(Boolean);
+                const size = parseInt(button.dataset.subheadingSize || '20', 10) || 20;
+                const color = (button.dataset.subheadingColor || '#ffffff').toString() || '#ffffff';
+                const bold = (button.dataset.subheadingBold || '0') === '1';
+                items = lines.map(t => ({ text: t, size, color, bold, font: 'system_sans' }));
+            }
+            if (window.WebinarSubheadingUI && typeof window.WebinarSubheadingUI.setModalItems === 'function') {
+                window.WebinarSubheadingUI.setModalItems(items);
+            }
             document.getElementById('modalHostname').value = button.dataset.hostname;
+            const hostDescField = document.getElementById('modalHostDescription');
+            if (hostDescField) hostDescField.value = button.dataset.hostDescription || '';
             document.getElementById('modalSchedule').value = button.dataset.schedule;
             document.getElementById('modalLink').value = button.dataset.link;
             document.getElementById('modalStatus').value = button.dataset.status;
@@ -982,6 +1249,244 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     <script>
       document.addEventListener('DOMContentLoaded', () => {
+        const WebinarSubheadingUI = (() => {
+          const fontOptions = [
+            { value: 'system_sans', label: 'System Sans' },
+            { value: 'system_serif', label: 'System Serif' },
+            { value: 'system_mono', label: 'System Mono' },
+            { value: 'arial', label: 'Arial' },
+            { value: 'georgia', label: 'Georgia' },
+            { value: 'times', label: 'Times New Roman' },
+            { value: 'courier', label: 'Courier New' },
+            { value: 'verdana', label: 'Verdana' },
+            { value: 'trebuchet', label: 'Trebuchet MS' }
+          ];
+
+          function safeColor(v) {
+            const s = String(v || '').trim();
+            if (!/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/.test(s)) return '#ffffff';
+            return s[0] === '#' ? s : ('#' + s);
+          }
+
+          function safeSize(v) {
+            const n = parseInt(v, 10);
+            if (!isFinite(n)) return 20;
+            return Math.max(10, Math.min(80, n));
+          }
+
+          function safeFont(v) {
+            const s = String(v || 'system_sans');
+            return fontOptions.some(o => o.value === s) ? s : 'system_sans';
+          }
+          
+          function fontFamilyForKey(key) {
+            const k = safeFont(key);
+            if (k === 'system_serif') return "ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif";
+            if (k === 'system_mono') return "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace";
+            if (k === 'arial') return "Arial, Helvetica, sans-serif";
+            if (k === 'georgia') return "Georgia, Cambria, 'Times New Roman', Times, serif";
+            if (k === 'times') return "'Times New Roman', Times, serif";
+            if (k === 'courier') return "'Courier New', Courier, monospace";
+            if (k === 'verdana') return "Verdana, Geneva, sans-serif";
+            if (k === 'trebuchet') return "'Trebuchet MS', 'Segoe UI', sans-serif";
+            return "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+          }
+
+          function escapeAttr(v) {
+            return String(v ?? '')
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#39;');
+          }
+
+          function itemTemplate(item, theme) {
+            const opts = fontOptions.map(o => `<option value="${o.value}" ${o.value === safeFont(item.font) ? 'selected' : ''}>${o.label}</option>`).join('');
+            const baseInput = theme === 'modal'
+              ? 'bg-slate-50 hover:bg-white border-slate-200 focus:ring-blue-500/20 focus:border-blue-500'
+              : 'bg-white border-slate-200 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a]';
+            const baseSelect = theme === 'modal'
+              ? 'bg-slate-50 hover:bg-white border-slate-200 focus:ring-blue-500/20 focus:border-blue-500'
+              : 'bg-white border-slate-200 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a]';
+            const card = theme === 'modal' ? 'bg-white' : 'bg-slate-50';
+
+            return `
+              <div class="rounded-2xl border border-slate-200 ${card} p-4 subheading-item">
+                <input type="text" class="subheading-item-text w-full px-4 py-2.5 ${baseInput} border rounded-xl outline-none text-sm text-slate-800 placeholder-slate-400" placeholder="Enter subheading" value="${escapeAttr(item.text || '')}">
+                <div class="mt-3 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                  <div class="sm:col-span-5">
+                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Font</label>
+                    <select class="subheading-item-font w-full h-[42px] px-3 ${baseSelect} border rounded-xl outline-none text-sm text-slate-800">${opts}</select>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Size</label>
+                    <input type="number" min="10" max="80" class="subheading-item-size w-full h-[42px] px-3 ${baseSelect} border rounded-xl outline-none text-sm text-slate-800" value="${safeSize(item.size)}">
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Color</label>
+                    <input type="color" class="subheading-item-color w-full h-[42px] px-2 py-2 ${baseSelect} border rounded-xl" value="${safeColor(item.color)}">
+                  </div>
+                  <div class="sm:col-span-3">
+                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 opacity-0 select-none">Actions</label>
+                    <div class="flex items-center justify-end gap-2">
+                      <label class="h-[42px] inline-flex items-center gap-2 px-3 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700">
+                        <input type="checkbox" class="subheading-item-bold w-4 h-4 rounded border-slate-300 text-[#1e4a7a] focus:ring-[#1e4a7a]/30" ${item.bold ? 'checked' : ''}>
+                        Bold
+                      </label>
+                      ${theme === 'modal'
+                        ? '<button type="button" class="subheading-item-remove w-[42px] h-[42px] inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" aria-label="Remove subheading" title="Remove"><i class="fas fa-trash-alt"></i></button>'
+                        : '<button type="button" class="subheading-item-remove h-[42px] px-3 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">Remove</button>'
+                      }
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+
+          function readItems(container) {
+            const items = [];
+            container.querySelectorAll('.subheading-item').forEach(el => {
+              const text = el.querySelector('.subheading-item-text')?.value?.trim() || '';
+              if (!text) return;
+              const font = safeFont(el.querySelector('.subheading-item-font')?.value);
+              const size = safeSize(el.querySelector('.subheading-item-size')?.value);
+              const color = safeColor(el.querySelector('.subheading-item-color')?.value);
+              const bold = !!el.querySelector('.subheading-item-bold')?.checked;
+              items.push({ text, font, size, color, bold });
+            });
+            return items.slice(0, 12);
+          }
+
+          function sync(container, hiddenText, hiddenJson) {
+            if (!container) return;
+            const items = readItems(container);
+            container.querySelectorAll('.subheading-item').forEach(el => {
+              const textEl = el.querySelector('.subheading-item-text');
+              const font = safeFont(el.querySelector('.subheading-item-font')?.value);
+              const size = safeSize(el.querySelector('.subheading-item-size')?.value);
+              const color = safeColor(el.querySelector('.subheading-item-color')?.value);
+              const bold = !!el.querySelector('.subheading-item-bold')?.checked;
+              if (textEl) {
+                textEl.style.fontFamily = fontFamilyForKey(font);
+                textEl.style.fontSize = size + 'px';
+                textEl.style.color = color;
+                textEl.style.fontWeight = bold ? 800 : 600;
+              }
+            });
+            if (hiddenText) hiddenText.value = items.map(i => i.text).join('\n');
+            if (hiddenJson) hiddenJson.value = items.length ? JSON.stringify(items) : '';
+            refreshRemoveButtons(container);
+          }
+
+          function refreshRemoveButtons(container) {
+            const items = Array.from(container.querySelectorAll('.subheading-item'));
+            const canRemove = items.length > 1;
+            items.forEach(el => {
+              const btn = el.querySelector('.subheading-item-remove');
+              if (btn) btn.disabled = !canRemove;
+            });
+          }
+
+          function addItem(container, theme, item) {
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = itemTemplate(item || { text: '', font: 'system_sans', size: 20, color: '#ffffff', bold: true }, theme);
+            const node = wrapper.firstElementChild;
+            container.appendChild(node);
+            refreshRemoveButtons(container);
+            node.querySelector('.subheading-item-text')?.focus();
+          }
+
+          function clearAndSet(container, theme, items) {
+            container.innerHTML = '';
+            const list = Array.isArray(items) && items.length ? items : [{ text: '', font: 'system_sans', size: 20, color: '#ffffff', bold: true }];
+            list.forEach(it => addItem(container, theme, it));
+          }
+
+          function getSectionFromTarget(target) {
+            const form = target.closest('form');
+            if (!form) return null;
+            if (form.id === 'addWebinarForm') {
+              return {
+                theme: 'add',
+                container: document.getElementById('addSubheadingItems'),
+                hiddenText: document.getElementById('addSubheadingHidden'),
+                hiddenJson: document.getElementById('addSubheadingItemsJson')
+              };
+            }
+            if (form.id === 'editWebinarForm') {
+              return {
+                theme: 'modal',
+                container: document.getElementById('modalSubheadingItems'),
+                hiddenText: document.getElementById('modalSubheadingHidden'),
+                hiddenJson: document.getElementById('modalSubheadingItemsJson')
+              };
+            }
+            return null;
+          }
+
+          function syncForm(form) {
+            if (!form) return;
+            if (form.id === 'addWebinarForm') {
+              sync(document.getElementById('addSubheadingItems'), document.getElementById('addSubheadingHidden'), document.getElementById('addSubheadingItemsJson'));
+            } else if (form.id === 'editWebinarForm') {
+              sync(document.getElementById('modalSubheadingItems'), document.getElementById('modalSubheadingHidden'), document.getElementById('modalSubheadingItemsJson'));
+            }
+          }
+
+          function setModalItems(items) {
+            const container = document.getElementById('modalSubheadingItems');
+            const hiddenText = document.getElementById('modalSubheadingHidden');
+            const hiddenJson = document.getElementById('modalSubheadingItemsJson');
+            if (!container) return;
+            clearAndSet(container, 'modal', items);
+            sync(container, hiddenText, hiddenJson);
+          }
+
+          function init() {
+            const addContainer = document.getElementById('addSubheadingItems');
+            if (addContainer) {
+              sync(addContainer, document.getElementById('addSubheadingHidden'), document.getElementById('addSubheadingItemsJson'));
+            }
+
+            document.addEventListener('click', (e) => {
+              const addBtn = e.target.closest('[data-sub-item-add]');
+              if (addBtn) {
+                const section = getSectionFromTarget(addBtn);
+                if (section && section.container) {
+                  addItem(section.container, section.theme);
+                  sync(section.container, section.hiddenText, section.hiddenJson);
+                }
+                return;
+              }
+              const rmBtn = e.target.closest('.subheading-item-remove');
+              if (rmBtn) {
+                const section = getSectionFromTarget(rmBtn);
+                if (section && section.container) {
+                  const items = Array.from(section.container.querySelectorAll('.subheading-item'));
+                  if (items.length > 1) {
+                    rmBtn.closest('.subheading-item')?.remove();
+                    sync(section.container, section.hiddenText, section.hiddenJson);
+                  }
+                }
+              }
+            });
+
+            document.addEventListener('input', (e) => {
+              const section = getSectionFromTarget(e.target);
+              if (section && section.container) {
+                sync(section.container, section.hiddenText, section.hiddenJson);
+              }
+            });
+          }
+
+          return { init, syncForm, setModalItems };
+        })();
+
+        window.WebinarSubheadingUI = WebinarSubheadingUI;
+        WebinarSubheadingUI.init();
+
         const overlay = document.getElementById('uploadProgressOverlay');
         const bar = document.getElementById('uploadProgressBar');
         const label = document.getElementById('uploadProgressLabel');
@@ -1070,6 +1575,9 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
         });
 
         function uploadForm(form, formId) {
+          if (window.WebinarSubheadingUI && typeof window.WebinarSubheadingUI.syncForm === 'function') {
+            window.WebinarSubheadingUI.syncForm(form);
+          }
           xhr = new XMLHttpRequest();
           activeFormId = formId;
           setSubmitting(formId, true);
@@ -1114,6 +1622,9 @@ $webinars = $stmt->fetchAll(PDO::FETCH_ASSOC);
           const form = document.getElementById(formId);
           if (!form) return;
           form.addEventListener('submit', (e) => {
+            if (window.WebinarSubheadingUI && typeof window.WebinarSubheadingUI.syncForm === 'function') {
+              window.WebinarSubheadingUI.syncForm(form);
+            }
             const hasFiles = Array.from(form.querySelectorAll('input[type="file"]')).some(i => i.files && i.files.length > 0);
             if (!hasFiles) return;
             if (locked) { e.preventDefault(); return; }

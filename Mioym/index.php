@@ -125,6 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_submit'])) {
 
             $mail->setFrom('mioymequities1@gmail.com', 'Mioym Equities');
             $mail->addAddress('jeswaaa1803@gmail.com', 'Mioym Contact Test');
+            // $mail->addAddress('Robert@mioymmequities.com', 'Mioym Equities');
             $mail->addReplyTo($cEmail, $cName);
             $mail->isHTML(true);
 
@@ -319,6 +320,53 @@ $webinarSubheadingSize = (int)($latestWebinar['subheading_size'] ?? 20);
 if ($webinarSubheadingSize < 10) $webinarSubheadingSize = 10;
 if ($webinarSubheadingSize > 80) $webinarSubheadingSize = 80;
 $webinarSubheadingBold = isset($latestWebinar['subheading_bold']) && (int)$latestWebinar['subheading_bold'] === 1;
+$webinarSubheadingColor = trim((string)($latestWebinar['subheading_color'] ?? ''));
+if ($webinarSubheadingColor === '' || !preg_match('/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/', $webinarSubheadingColor)) {
+    $webinarSubheadingColor = '#ffffff';
+} elseif ($webinarSubheadingColor[0] !== '#') {
+    $webinarSubheadingColor = '#' . $webinarSubheadingColor;
+}
+$webinarSubheadingItems = [];
+$rawSubItems = trim((string)($latestWebinar['subheading_items_json'] ?? ''));
+if ($rawSubItems !== '') {
+    $decoded = json_decode($rawSubItems, true);
+    if (is_array($decoded)) {
+        $allowedFonts = ['system_sans','system_serif','system_mono','arial','georgia','times','courier','verdana','trebuchet'];
+        foreach ($decoded as $it) {
+            if (!is_array($it)) continue;
+            $text = trim((string)($it['text'] ?? ''));
+            if ($text === '') continue;
+            $size = (int)($it['size'] ?? 20);
+            if ($size < 10) $size = 10;
+            if ($size > 80) $size = 80;
+            $color = trim((string)($it['color'] ?? '#ffffff'));
+            if (!preg_match('/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/', $color)) $color = '#ffffff';
+            if ($color !== '' && $color[0] !== '#') $color = '#' . $color;
+            $bold = !empty($it['bold']);
+            $font = (string)($it['font'] ?? 'system_sans');
+            if (!in_array($font, $allowedFonts, true)) $font = 'system_sans';
+            $webinarSubheadingItems[] = ['text' => $text, 'size' => $size, 'color' => $color, 'bold' => $bold, 'font' => $font];
+            if (count($webinarSubheadingItems) >= 12) break;
+        }
+    }
+}
+$hasAnySubheading = !empty($webinarSubheadingItems) || $webinarSubheading !== '';
+
+function landing_subheading_font_stack($key) {
+    $key = (string)$key;
+    $map = [
+        'system_sans' => "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+        'system_serif' => "ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif",
+        'system_mono' => "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+        'arial' => "Arial, Helvetica, sans-serif",
+        'georgia' => "Georgia, Cambria, 'Times New Roman', Times, serif",
+        'times' => "'Times New Roman', Times, serif",
+        'courier' => "'Courier New', Courier, monospace",
+        'verdana' => "Verdana, Geneva, sans-serif",
+        'trebuchet' => "'Trebuchet MS', 'Segoe UI', sans-serif"
+    ];
+    return $map[$key] ?? $map['system_sans'];
+}
 $webinarDescriptionRaw = trim((string)($latestWebinar['description'] ?? ''));
 $webinarDescriptionLines = preg_split("/\r\n|\r|\n/", $webinarDescriptionRaw);
 $webinarDescriptionLines = array_values(array_filter(array_map('trim', $webinarDescriptionLines), static fn ($l) => $l !== ''));
@@ -540,10 +588,9 @@ if ($feedbackTableReady) {
         <!-- ========== SECTION 4.1: HEADER ========== -->
         <div class="flex justify-between items-center">
             <div class="flex items-center">
-                <div class=" bg-[#0f2b44] text-white w-16 h-16 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-full ring-1 ring-white/15 shadow-lg flex items-center justify-center overflow-hidden">
-                    <img src="img/logo.png" alt="Mioym Group" class="w-full h-full object-contain p-2">
+                <div class="text-white w-80 h-24 sm:h-28 md:h-32 flex items-center justify-center overflow-hidden">
+                    <img src="img/logo2.png" alt="Mioym Group" class="w-full h-full object-contain">
                 </div>
-                <h1 class="ml-3 text-black font-extrabold text-3xl sm:text-4xl tracking-tight leading-none">Mioym Equities</h1>
             </div>
             <span class="inline-flex items-center gap-2 text-xs sm:text-sm bg-[#0f2b44] text-white border border-white/15 px-3 sm:px-4 py-2 rounded-full shadow-sm backdrop-blur">
                 <i class="far fa-calendar-alt text-amber-300"></i> <?php echo htmlspecialchars($scheduleDate); ?>
@@ -564,14 +611,19 @@ if ($feedbackTableReady) {
                     <h1 class="text-4xl md:text-5xl lg:text-5xl font-extrabold tracking-tight text-white leading-tight">
                         <?php echo nl2br(htmlspecialchars($webinarTitle, ENT_QUOTES, 'UTF-8')); ?>
                     </h1>
-                    <?php if ($webinarSubheading !== ''): ?>
-                        <div class="mt-3 mb-5 text-white/90 tracking-tight leading-snug" style="font-size: <?php echo (int)$webinarSubheadingSize; ?>px; font-weight: <?php echo $webinarSubheadingBold ? 800 : 600; ?>;">
+                    <?php if (!empty($webinarSubheadingItems)): ?>
+                        <div class="mt-3 mb-5 space-y-2">
+                            <?php foreach ($webinarSubheadingItems as $it): ?>
+                                <div class="tracking-tight leading-snug" style="font-size: <?php echo (int)($it['size'] ?? 20); ?>px; font-weight: <?php echo !empty($it['bold']) ? 800 : 600; ?>; color: <?php echo htmlspecialchars((string)($it['color'] ?? '#ffffff')); ?>; font-family: <?php echo htmlspecialchars(landing_subheading_font_stack((string)($it['font'] ?? 'system_sans'))); ?>;">
+                                    <?php echo htmlspecialchars((string)($it['text'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php elseif ($webinarSubheading !== ''): ?>
+                        <div class="mt-3 mb-5 tracking-tight leading-snug" style="font-size: <?php echo (int)$webinarSubheadingSize; ?>px; font-weight: <?php echo $webinarSubheadingBold ? 800 : 600; ?>; color: <?php echo htmlspecialchars($webinarSubheadingColor); ?>;">
                             <?php echo nl2br(htmlspecialchars($webinarSubheading, ENT_QUOTES, 'UTF-8')); ?>
                         </div>
                     <?php endif; ?>
-                    <p class="<?php echo $webinarSubheading !== '' ? 'mt-2' : 'mt-5'; ?> text-lg md:text-xl font-bold tracking-wide uppercase text-[#f59e0b] max-w-xl">
-                        USING SINGLE FAMILY HOMES BOUGHT RENOVATED AND SOLD TO FIRST TIME HOMEOWNERS
-                    </p>
                     <p class="text-lg md:text-xl text-slate-200 mt-6 max-w-lg">
                         <?php if ($webinarDescriptionLead !== ''): ?>
                             <?php echo htmlspecialchars($webinarDescriptionLead); ?>
@@ -932,8 +984,8 @@ if ($feedbackTableReady) {
         <!-- ========== SECTION 4.4: SECOND CTA SECTION ========== -->
         <div class="bg-[#0f2b44] text-white rounded-3xl p-10 md:p-14 shadow-2xl mt-16 mb-20">
             <div class="max-w-3xl mx-auto text-center">
-                <h2 class="text-3xl md:text-4xl font-bold mb-4">Reserve your virtual seat now</h2>
-                <p class="text-lg text-slate-300 mb-8">Thursday 24 April · 6pm BST | 1pm EST · free live stream + replay</p>
+                <h2 class="text-3xl md:text-4xl font-bold mb-4"><?php echo htmlspecialchars($webinarTitle); ?></h2>
+                <p class="text-lg text-slate-300 mb-8"><?php echo htmlspecialchars($scheduleDate); ?> · free live stream + replay</p>
                 <a href="registration.php" class="inline-flex items-center gap-3 bg-amber-400 hover:bg-amber-300 text-[#0f2b44] font-bold text-xl px-10 py-5 rounded-full shadow-xl transition transform hover:scale-105">
                     <i class="fas fa-ticket-alt"></i> Register now — it's free
                 </a>

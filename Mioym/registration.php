@@ -137,7 +137,7 @@ document.addEventListener('DOMContentLoaded', function(){
                                 <i class="fas fa-phone text-sm"></i>
                             </div>
                             <div class="text-sm">
-                                <div class="font-semibold text-slate-800">+63 914 566 9050</div>
+                                <div class="font-semibold text-slate-800">914 400 7980</div>
                                 <div class="text-slate-500">Office hotline</div>
                             </div>
                         </div>
@@ -146,7 +146,7 @@ document.addEventListener('DOMContentLoaded', function(){
                                 <i class="fas fa-map-marker-alt text-sm"></i>
                             </div>
                             <div class="text-sm">
-                                <div class="font-semibold text-slate-800 leading-tight">2900 Westchester Ave.<br>Ste. 302 Purchase, NY 10577</div>
+                                <div class="font-semibold text-slate-800 leading-tight">2900 Westchester Ave Purchase, NY 10577</div>
                                 <div class="text-slate-500 mt-0.5">Mayfair office</div>
                             </div>
                         </div>
@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded', function(){
                                 <i class="fas fa-envelope text-sm"></i>
                             </div>
                             <div class="text-sm">
-                                <div class="font-semibold text-slate-800">Oscar@mioym.com</div>
+                                <div class="font-semibold text-slate-800">Robert@mioymmequities.com</div>
                                 <div class="text-slate-500">Support email</div>
                             </div>
                         </div>
