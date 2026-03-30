@@ -131,10 +131,10 @@ document.addEventListener('DOMContentLoaded', function(){
                         Ready to join the webinar? Fill out the form to reserve your seat. Your registration is saved to our CRM and you’ll be redirected to the confirmation page.
                     </p>
 
-                    <div class="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="mt-7 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5">
                         <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center">
-                                <i class="fas fa-phone text-sm"></i>
+                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center shrink-0 shadow-sm">
+                                <i class="fas fa-phone-alt text-sm"></i>
                             </div>
                             <div class="text-sm">
                                 <div class="font-semibold text-slate-800">914 400 7980</div>
@@ -142,24 +142,34 @@ document.addEventListener('DOMContentLoaded', function(){
                             </div>
                         </div>
                         <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center">
+                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center shrink-0 shadow-sm">
+                                <i class="fas fa-mobile-alt text-sm"></i>
+                            </div>
+                            <div class="text-sm">
+                                <div class="font-semibold text-slate-800">914 400 7980</div>
+                                <div class="text-slate-500">Mobile support</div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center shrink-0 shadow-sm">
                                 <i class="fas fa-map-marker-alt text-sm"></i>
                             </div>
                             <div class="text-sm">
-                                <div class="font-semibold text-slate-800 leading-tight">2900 Westchester Ave Purchase, NY 10577</div>
-                                <div class="text-slate-500 mt-0.5">Mayfair office</div>
+                                <div class="font-semibold text-slate-800 leading-tight">2900 Westchester Ave.<br>Ste. 302 Purchase, NY 10577</div>
+                                <div class="text-slate-500 mt-0.5">Office</div>
                             </div>
                         </div>
-                        <div class="flex items-center gap-3 sm:col-span-2">
-                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center shrink-0 shadow-sm">
                                 <i class="fas fa-envelope text-sm"></i>
                             </div>
                             <div class="text-sm">
-                                <div class="font-semibold text-slate-800">Robert@mioymmequities.com</div>
+                                <div class="font-semibold text-slate-800">Robert@mioymequities.com</div>
                                 <div class="text-slate-500">Support email</div>
                             </div>
                         </div>
                     </div>
+                    
 
                     <div class="mt-12 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                         <div class="text-sm font-semibold text-slate-800 flex items-center gap-2">
