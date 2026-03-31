@@ -999,9 +999,8 @@ if ($feedbackTableReady) {
                     <h2 class="text-3xl font-bold text-slate-900">Contact us</h2>
                     <p class="text-slate-600">Questions about the webinar or co‑investing with us? Reach out and our team will respond within 24h.</p>
                     <div class="space-y-3">
-                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-envelope text-amber-500"></i><span>Robert@mioymmequities.com</span></div>
-                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-phone text-amber-500"></i><span>Office: 914 566 8292 x 199 </span></div>
-                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-phone text-amber-500"></i><span>Mobile: 914 400 7980</span></div>
+                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-envelope text-amber-500"></i><span>Robert@mioymequities.com</span></div>
+                        <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-phone text-amber-500"></i><span>Office: 914 566 8292</span></div>
                         <div class="flex items-center gap-3 text-slate-700"><i class="fas fa-map-marker-alt text-amber-500"></i><span>2900 Westchester Ave Purchase, NY 10577</span></div>
                     </div>
                 </div>

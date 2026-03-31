@@ -183,15 +183,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'update_profile') {
         $newDisplayName = trim((string)($_POST['display_name'] ?? ''));
         $newEmail = trim((string)($_POST['email'] ?? ''));
+        $newUsernameInput = trim((string)($_POST['username_input'] ?? ''));
 
         if ($newDisplayName === '') $newDisplayName = (string)$displayName;
         if ($newEmail === '') $newEmail = (string)$email;
+        if ($newUsernameInput === '') $newUsernameInput = (string)$adminUsername;
 
         if ($newEmail !== '' && !filter_var($newEmail, FILTER_VALIDATE_EMAIL)) {
             $_SESSION['di'] = ['type' => 'warn', 'title' => 'Profile', 'message' => 'Please enter a valid email address or leave it blank.'];
             $_SESSION['profile_shake'] = 'profile';
             header('Location: admin_profile.php');
             exit;
+        }
+
+        // Check if username already exists if changed
+        if ($newUsernameInput !== $adminUsername) {
+            try {
+                $checkStmt = $pdo->prepare("SELECT id FROM admin_tbl WHERE username = ? AND username <> ? LIMIT 1");
+                $checkStmt->execute([$newUsernameInput, $adminUsername]);
+                if ($checkStmt->fetch()) {
+                    $_SESSION['di'] = ['type' => 'error', 'title' => 'Profile', 'message' => 'Username already taken. Please choose another one.'];
+                    $_SESSION['profile_shake'] = 'profile';
+                    header('Location: admin_profile.php');
+                    exit;
+                }
+            } catch (Throwable $e) {}
         }
 
         try {
@@ -201,6 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 if ($newAvatarPath) $hasAnyChange = true;
                 if ((string)$newDisplayName !== (string)$displayName) $hasAnyChange = true;
                 if ((string)$newEmail !== (string)$email) $hasAnyChange = true;
+                if ((string)$newUsernameInput !== (string)$adminUsername) $hasAnyChange = true;
 
                 if (!$hasAnyChange) {
                     $_SESSION['di'] = ['type' => 'info', 'title' => 'Profile', 'message' => 'No changes to save.'];
@@ -211,12 +228,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     if (is_string($avatarPath) && $avatarPath !== '' && file_exists(__DIR__ . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $avatarPath))) {
                         @unlink(__DIR__ . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $avatarPath));
                     }
-                    $stmt = $pdo->prepare("UPDATE admin_tbl SET display_name = ?, email = ?, avatar_path = ? WHERE username = ?");
-                    $stmt->execute([$newDisplayName, $newEmail !== '' ? $newEmail : null, $newAvatarPath, $adminUsername]);
+                    $stmt = $pdo->prepare("UPDATE admin_tbl SET display_name = ?, email = ?, avatar_path = ?, username = ? WHERE username = ?");
+                    $stmt->execute([$newDisplayName, $newEmail !== '' ? $newEmail : null, $newAvatarPath, $newUsernameInput, $adminUsername]);
                 } else {
-                    $stmt = $pdo->prepare("UPDATE admin_tbl SET display_name = ?, email = ? WHERE username = ?");
-                    $stmt->execute([$newDisplayName, $newEmail !== '' ? $newEmail : null, $adminUsername]);
+                    $stmt = $pdo->prepare("UPDATE admin_tbl SET display_name = ?, email = ?, username = ? WHERE username = ?");
+                    $stmt->execute([$newDisplayName, $newEmail !== '' ? $newEmail : null, $newUsernameInput, $adminUsername]);
                 }
+
+                // If username changed, update related records and session
+                if ($newUsernameInput !== $adminUsername) {
+                    try {
+                        $pdo->prepare("UPDATE admin_login_activity SET username = ? WHERE username = ?")->execute([$newUsernameInput, $adminUsername]);
+                        $pdo->prepare("UPDATE admin_sessions SET username = ? WHERE username = ?")->execute([$newUsernameInput, $adminUsername]);
+                    } catch (Throwable $e) {}
+                    $_SESSION['admin_username'] = $newUsernameInput;
+                }
+
                 $_SESSION['di'] = ['type' => 'success', 'title' => 'Profile', 'message' => 'Profile updated successfully.'];
             } else {
                 $_SESSION['di'] = ['type' => 'warn', 'title' => 'Profile', 'message' => 'Profile fields are not available in the database.'];
@@ -710,7 +737,11 @@ document.addEventListener('DOMContentLoaded', function(){
                             <form method="POST" enctype="multipart/form-data" class="mt-6 space-y-4" id="profileForm">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value'], ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="action" value="update_profile">
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-xs font-extrabold text-slate-500 uppercase tracking-widest mb-2">Username</label>
+                                        <input type="text" name="username_input" value="<?php echo htmlspecialchars($adminUsername); ?>" class="field w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 font-semibold text-slate-800" required>
+                                    </div>
                                     <div>
                                         <label class="block text-xs font-extrabold text-slate-500 uppercase tracking-widest mb-2">Display Name</label>
                                         <input type="text" name="display_name" value="<?php echo htmlspecialchars($displayName); ?>" class="field w-full px-4 py-3 rounded-2xl border border-slate-200 bg-slate-50 font-semibold text-slate-800" required>

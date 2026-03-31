@@ -137,19 +137,11 @@ document.addEventListener('DOMContentLoaded', function(){
                                 <i class="fas fa-phone-alt text-sm"></i>
                             </div>
                             <div class="text-sm">
-                                <div class="font-semibold text-slate-800">914 400 7980</div>
+                                <div class="font-semibold text-slate-800">914 566 8292</div>
                                 <div class="text-slate-500">Office hotline</div>
                             </div>
                         </div>
-                        <div class="flex items-center gap-3">
-                            <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center shrink-0 shadow-sm">
-                                <i class="fas fa-mobile-alt text-sm"></i>
-                            </div>
-                            <div class="text-sm">
-                                <div class="font-semibold text-slate-800">914 400 7980</div>
-                                <div class="text-slate-500">Mobile support</div>
-                            </div>
-                        </div>
+                        
                         <div class="flex items-center gap-3">
                             <div class="w-10 h-10 rounded-full bg-[#0f2b44] text-white flex items-center justify-center shrink-0 shadow-sm">
                                 <i class="fas fa-map-marker-alt text-sm"></i>
