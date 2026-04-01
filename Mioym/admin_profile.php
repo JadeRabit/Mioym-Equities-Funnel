@@ -485,7 +485,7 @@ function device_label($ua) {
         [x-cloak] { display: none !important; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 antialiased min-h-screen">
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen overflow-hidden">
 <?php if (!empty($_SESSION['di'])): $___di = $_SESSION['di']; unset($_SESSION['di']); ?>
 <script>
 document.addEventListener('DOMContentLoaded', function(){
@@ -508,7 +508,7 @@ document.addEventListener('DOMContentLoaded', function(){
         <?php include 'sidebar.php'; ?>
 
         <main class="flex-1 overflow-y-auto bg-slate-50 p-6 lg:p-10">
-            <div class="max-w-6xl mx-auto">
+            <div class="w-full">
                 <div class="bg-white border border-slate-100 rounded-[2rem] p-6 lg:p-8 card-glow relative overflow-hidden">
                     <div class="absolute inset-0 pointer-events-none" style="background: radial-gradient(800px 220px at 20% 0%, rgba(59,130,246,0.10), transparent 60%), radial-gradient(700px 240px at 85% 10%, rgba(245,158,11,0.12), transparent 55%);"></div>
                     <div class="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">

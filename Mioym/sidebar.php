@@ -60,8 +60,11 @@ $page_titles = [
     'admin.php' => 'Dashboard',
     'webinars.php' => 'Webinars',
     'registrants.php' => 'Registrants',
+    'admin_notifications_list.php' => 'Notifications',
+    'admin_reviews.php' => 'Manage Reviews',
     'emails.php' => 'Email Automation',
-    'admin_profile.php' => 'Profile'
+    'admin_profile.php' => 'Profile',
+    'admin_settings.php' => 'Global Settings'
 ];
 $current_title = $page_titles[$current_page] ?? 'Admin';
 ?>
@@ -154,7 +157,7 @@ $current_title = $page_titles[$current_page] ?? 'Admin';
 <div id="sidebarOverlay" class="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-40 hidden md:hidden transition-opacity duration-300 opacity-0" aria-hidden="true"></div>
 
 <!-- Sidebar -->
-<aside id="mainSidebar" class="fixed md:static inset-y-0 left-0 z-50 bg-slate-900 text-slate-300 flex flex-col sidebar-mobile-hidden sidebar-expanded transition-all duration-300 ease-in-out border-r border-slate-800 shadow-xl md:shadow-none" role="navigation" aria-label="Main Navigation">
+<aside id="mainSidebar" class="fixed md:sticky top-0 h-screen shrink-0 left-0 z-50 bg-slate-900 text-slate-300 flex flex-col sidebar-mobile-hidden sidebar-expanded transition-all duration-300 ease-in-out border-r border-slate-800 shadow-xl md:shadow-none" role="navigation" aria-label="Main Navigation">
     
     <!-- Header / Logo Area -->
     <div class="h-20 p-4 flex items-center justify-between border-b border-slate-800/50">
@@ -230,6 +233,30 @@ $current_title = $page_titles[$current_page] ?? 'Admin';
             </li>
 
             <li role="none">
+                <a href="admin_notifications_list.php" role="menuitem" class="nav-link group relative flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 text-sm font-medium <?php echo $current_page == 'admin_notifications_list.php' ? 'bg-[#1e4a7a] text-white shadow-md' : 'hover:bg-slate-800 hover:text-white text-slate-400'; ?> focus:outline-none focus:ring-2 focus:ring-slate-400" aria-current="<?php echo $current_page == 'admin_notifications_list.php' ? 'page' : 'false'; ?>" title="Notifications">
+                    <div class="min-w-[24px] flex justify-center">
+                        <i class="fas fa-bell text-lg <?php echo $current_page == 'admin_notifications_list.php' ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'; ?> transition-colors"></i>
+                    </div>
+                    <span class="nav-text whitespace-nowrap transition-opacity duration-300">Notifications</span>
+                    <?php if($current_page == 'admin_notifications_list.php'): ?>
+                    <div class="absolute left-0 top-2 bottom-2 w-1 bg-white rounded-r-full md:hidden"></div>
+                    <?php endif; ?>
+                </a>
+            </li>
+
+            <li role="none">
+                <a href="admin_reviews.php" role="menuitem" class="nav-link group relative flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 text-sm font-medium <?php echo $current_page == 'admin_reviews.php' ? 'bg-[#1e4a7a] text-white shadow-md' : 'hover:bg-slate-800 hover:text-white text-slate-400'; ?> focus:outline-none focus:ring-2 focus:ring-slate-400" aria-current="<?php echo $current_page == 'admin_reviews.php' ? 'page' : 'false'; ?>" title="Manage Reviews">
+                    <div class="min-w-[24px] flex justify-center">
+                        <i class="fas fa-star text-lg <?php echo $current_page == 'admin_reviews.php' ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'; ?> transition-colors"></i>
+                    </div>
+                    <span class="nav-text whitespace-nowrap transition-opacity duration-300">Manage Reviews</span>
+                    <?php if($current_page == 'admin_reviews.php'): ?>
+                    <div class="absolute left-0 top-2 bottom-2 w-1 bg-white rounded-r-full md:hidden"></div>
+                    <?php endif; ?>
+                </a>
+            </li>
+
+            <li role="none">
                 <a href="emails.php" role="menuitem" class="nav-link group relative flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 text-sm font-medium <?php echo $current_page == 'emails.php' ? 'bg-[#1e4a7a] text-white shadow-md' : 'hover:bg-slate-800 hover:text-white text-slate-400'; ?> focus:outline-none focus:ring-2 focus:ring-slate-400" aria-current="<?php echo $current_page == 'emails.php' ? 'page' : 'false'; ?>" title="Email Automation">
                     <div class="min-w-[24px] flex justify-center">
                         <i class="fas fa-paper-plane text-lg <?php echo $current_page == 'emails.php' ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'; ?> transition-colors"></i>
@@ -248,6 +275,18 @@ $current_title = $page_titles[$current_page] ?? 'Admin';
                     </div>
                     <span class="nav-text whitespace-nowrap transition-opacity duration-300">Profile</span>
                     <?php if($current_page == 'admin_profile.php'): ?>
+                    <div class="absolute left-0 top-2 bottom-2 w-1 bg-white rounded-r-full md:hidden"></div>
+                    <?php endif; ?>
+                </a>
+            </li>
+
+            <li role="none">
+                <a href="admin_settings.php" role="menuitem" class="nav-link group relative flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 text-sm font-medium <?php echo $current_page == 'admin_settings.php' ? 'bg-[#1e4a7a] text-white shadow-md' : 'hover:bg-slate-800 hover:text-white text-slate-400'; ?> focus:outline-none focus:ring-2 focus:ring-slate-400" aria-current="<?php echo $current_page == 'admin_settings.php' ? 'page' : 'false'; ?>" title="Global Settings">
+                    <div class="min-w-[24px] flex justify-center">
+                        <i class="fas fa-cog text-lg <?php echo $current_page == 'admin_settings.php' ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'; ?> transition-colors"></i>
+                    </div>
+                    <span class="nav-text whitespace-nowrap transition-opacity duration-300">Settings</span>
+                    <?php if($current_page == 'admin_settings.php'): ?>
                     <div class="absolute left-0 top-2 bottom-2 w-1 bg-white rounded-r-full md:hidden"></div>
                     <?php endif; ?>
                 </a>

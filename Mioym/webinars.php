@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once 'db.php';
+require_once 'config.php';
 
 if (!isset($_SESSION['admin_logged_in'])) {
     header('Location: registration.php');
@@ -412,7 +413,7 @@ function webinar_subheading_font_stack($key) {
         body.dark-theme .border-slate-200 { border-color: #334155 !important; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen">
+<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen overflow-hidden">
 
     <div class="flex h-screen overflow-hidden">
         

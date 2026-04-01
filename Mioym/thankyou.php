@@ -1,6 +1,7 @@
 <?php
 // thankyou.php - Thank You / Confirmation Page (FIXED - SCROLLABLE)
 require_once 'db.php';
+require_once 'config.php';
 
 $name = isset($_GET['fullname']) ? htmlspecialchars($_GET['fullname']) : (isset($_GET['name']) ? htmlspecialchars($_GET['name']) : 'Valued Investor');
 
@@ -80,42 +81,42 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
 </head>
 <body class="confetti-bg text-slate-800 antialiased min-h-screen p-5">
 
-    <main class="max-w-2xl mx-auto py-8">
+    <main class="max-w-2xl mx-auto py-4 sm:py-8">
         <!-- Main confirmation card -->
-        <div class="bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 p-8 md:p-12 relative overflow-hidden">
+        <div class="bg-white rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl border border-slate-100 p-6 sm:p-10 md:p-12 relative overflow-hidden">
             <!-- Success checkmark animation -->
-            <div class="absolute top-0 right-0 w-40 h-40 bg-green-50 rounded-bl-full -z-5"></div>
+            <div class="absolute top-0 right-0 w-32 h-32 sm:w-40 sm:h-40 bg-green-50 rounded-bl-full -z-5"></div>
             
-            <div class="text-center mb-10">
-                <div class="bg-green-100 w-24 h-24 rounded-full flex items-center justify-center text-green-600 text-5xl mx-auto mb-6 shadow-lg border-4 border-white">
+            <div class="text-center mb-8 sm:mb-10">
+                <div class="bg-green-100 w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center text-green-600 text-4xl sm:text-5xl mx-auto mb-6 shadow-lg border-4 border-white">
                     <i class="fas fa-check-circle"></i>
                 </div>
-                <h1 class="text-4xl md:text-5xl font-extrabold text-slate-900 mb-4 tracking-tight">
+                <h1 class="text-3xl sm:text-4xl md:text-5xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">
                     Thank You, <span class="text-[#1e4a7a]"><?php echo $name; ?></span>! 
                 </h1>
-                <p class="text-xl text-slate-600 font-medium">You're successfully registered for the webinar.</p>
+                <p class="text-lg sm:text-xl text-slate-600 font-medium">You're successfully registered.</p>
             </div>
 
             <!-- Confirmation message box -->
-            <div class="bg-blue-50/50 border-l-4 border-[#1e4a7a] rounded-r-2xl p-6 mb-10">
+            <div class="bg-blue-50/50 border-l-4 border-[#1e4a7a] rounded-r-2xl p-5 sm:p-6 mb-8 sm:mb-10">
                 <div class="flex items-start gap-4">
                     <div class="w-10 h-10 bg-[#1e4a7a] rounded-xl flex items-center justify-center text-white flex-shrink-0">
                         <i class="fas fa-envelope-open-text text-lg"></i>
                     </div>
                     <div>
-                        <h3 class="font-bold text-slate-900 text-lg">Confirmation email sent!</h3>
-                        <p class="text-slate-600 leading-relaxed">We've sent a confirmation to your email with the webinar access link and calendar invite. Please check your inbox (and spam folder).</p>
+                        <h3 class="font-bold text-slate-900 text-lg">Email sent!</h3>
+                        <p class="text-sm sm:text-base text-slate-600 leading-relaxed">Check your inbox for the access link and calendar invite.</p>
                     </div>
                 </div>
             </div>
 
             <!-- Webinar Details -->
-            <div class="mb-10">
-                <h2 class="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-3">
+            <div class="mb-8 sm:mb-10">
+                <h2 class="text-xl sm:text-2xl font-bold text-slate-900 mb-6 flex items-center gap-3">
                     <i class="fas fa-video text-[#1e4a7a]"></i> Webinar Details
                 </h2>
                 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                     <!-- Date & Time -->
                     <div class="bg-slate-50/80 rounded-2xl p-5 border border-slate-100 transition-all hover:shadow-md">
                         <div class="flex items-center gap-4">
@@ -138,7 +139,7 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
                             </div>
                             <div>
                                 <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Duration</p>
-                                <p class="font-bold text-slate-900">60 minutes</p>
+                                <p class="font-bold text-slate-900"><?php echo htmlspecialchars(get_setting('webinar_duration', '60-minute')); ?></p>
                                 <p class="text-sm text-slate-600 font-medium">+ 15 min Q&A</p>
                             </div>
                         </div>

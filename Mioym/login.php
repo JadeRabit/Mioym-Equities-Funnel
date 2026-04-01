@@ -18,7 +18,7 @@ function validate_csrf_post() {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validate_csrf_post()) {
         $_SESSION['di'] = ['type' => 'error', 'title' => 'Security', 'message' => 'Security check failed. Please try again.'];
-        $dest = !empty($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'registration.php';
+        $dest = !empty($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'index.php';
         header('Location: ' . $dest);
         exit;
     }
@@ -82,12 +82,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     } else {
         $_SESSION['di'] = ['type' => 'warn', 'title' => 'Login Failed', 'message' => 'Invalid credentials. Please check your username and password.'];
-        $dest = !empty($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'registration.php';
+        $dest = !empty($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'index.php';
         header('Location: ' . $dest);
         exit;
     }
 } else {
-    header('Location: registration.php');
+    header('Location: index.php');
     exit;
 }
 ?>

@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once 'db.php';
+require_once 'config.php';
 
 if (!isset($_SESSION['admin_logged_in'])) {
     header('Location: registration.php');
@@ -109,6 +110,7 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="dynamic-island.js"></script>
     <style>
         body { font-family: 'Plus Jakarta Sans', sans-serif; }
         .sticky-header th { position: sticky; top: 0; background: #f8fafc; z-index: 10; }
@@ -123,7 +125,7 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
         body.dark-theme .bg-emerald-100\/50 { background-color: rgba(16, 185, 129, 0.15) !important; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen">
+<body class="bg-slate-50 text-slate-800 font-sans antialiased min-h-screen overflow-hidden">
 
     <div class="flex h-screen overflow-hidden">
         
@@ -264,14 +266,25 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
                                 </td>
                                 
                                 <td class="p-4 text-right">
-                                    <form method="POST" action="emails.php" class="send-email-form inline" onsubmit="return handleSingleSend(this, '<?php echo htmlspecialchars(addslashes($r['fullname'])); ?>');">
+                                    <form method="POST" action="emails.php" class="send-email-form inline">
                                         <input type="hidden" name="action" value="send_emails">
                                         <input type="hidden" name="registrant_id" value="<?php echo $r['id']; ?>">
                                         <input type="hidden" name="email_template" value="Hi [Name],&#10;&#10;Here is your webinar link: [Link]&#10;&#10;See you there!">
-                                        <button type="submit" class="send-btn inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm hover:shadow-blue-200" title="Send Email">
-                                            <i class="fas fa-paper-plane text-[10px]"></i>
-                                            <span>Send</span>
-                                        </button>
+                                        
+                                        <?php if($r['email_sent']): ?>
+                                            <button type="button" disabled class="inline-flex items-center gap-2 bg-slate-100 text-slate-400 px-4 py-1.5 rounded-xl text-xs font-bold cursor-not-allowed border border-slate-200" title="Email already sent">
+                                                <i class="fas fa-check text-[10px]"></i>
+                                                <span>Sent</span>
+                                            </button>
+                                        <?php else: ?>
+                                            <button type="button" 
+                                                    id="send-btn-<?php echo $r['id']; ?>"
+                                                    onclick="openSendModal(<?php echo $r['id']; ?>, '<?php echo addslashes(htmlspecialchars($r['fullname'])); ?>')" 
+                                                    class="send-btn inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm hover:shadow-blue-200" title="Send Email">
+                                                <i class="fas fa-paper-plane text-[10px]"></i>
+                                                <span class="btn-text">Send</span>
+                                            </button>
+                                        <?php endif; ?>
                                     </form>
                                 </td>
                             </tr>
@@ -344,6 +357,33 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
         <input type="hidden" name="bulk_ids" id="bulk-delete-ids">
     </form>
 
+    <!-- Email Send Confirmation Modal -->
+    <div id="sendEmailModal" class="fixed inset-0 z-[100] hidden">
+        <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="bg-white rounded-[2.5rem] w-full max-w-md overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
+                <div class="p-8 text-center">
+                    <div class="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                        <i class="fas fa-paper-plane text-3xl text-blue-600"></i>
+                    </div>
+                    <h3 class="text-2xl font-black text-slate-900 tracking-tight mb-2">Send Email?</h3>
+                    <p class="text-slate-500 font-medium leading-relaxed mb-8">
+                        Are you sure you want to send the webinar invitation to <span id="sendRegistrantName" class="font-bold text-slate-900"></span>?
+                    </p>
+                    
+                    <div class="flex flex-col gap-3">
+                        <button type="button" onclick="confirmSend()" class="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-2xl transition-all shadow-lg shadow-blue-200">
+                            Yes, Send Now
+                        </button>
+                        <button type="button" onclick="closeSendModal()" class="w-full py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black rounded-2xl transition-all">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         const tableSearch = document.getElementById('table-search');
         const filterCategory = document.getElementById('filter-category');
@@ -382,24 +422,91 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
             cb.addEventListener('change', updateBulkToolbar);
         });
 
-        // Action Handlers
-        window.handleSingleSend = async (form, name) => {
-            if (!confirm(`Send email specifically to ${name}?`)) return false;
+        // --- Single Send Logic with Modal & Cooldown ---
+        const sendModal = document.getElementById('sendEmailModal');
+        const sendRegistrantName = document.getElementById('sendRegistrantName');
+        let currentRegistrantId = null;
+
+        window.openSendModal = (id, name) => {
+            currentRegistrantId = id;
+            sendRegistrantName.innerText = name;
+            sendModal.classList.remove('hidden');
+        };
+
+        window.closeSendModal = () => {
+            sendModal.classList.add('hidden');
+            currentRegistrantId = null;
+        };
+
+        window.confirmSend = () => {
+            if (!currentRegistrantId) return;
             
-            const btn = form.querySelector('.send-btn');
+            const btn = document.getElementById(`send-btn-${currentRegistrantId}`);
+            const form = btn.closest('form');
             
-            // Loading State
+            closeSendModal();
+            
+            // Show processing state in Dynamic Island
+            if (window.DynamicIsland) {
+                DynamicIsland.info(`Sending email to ${sendRegistrantName.innerText}...`, 'Processing');
+            }
+
+            // Visual feedback on button
             btn.disabled = true;
             btn.classList.add('opacity-80', 'cursor-not-allowed');
             btn.innerHTML = `<i class="fas fa-circle-notch loading-spinner text-[10px]"></i> <span>Sending...</span>`;
             
+            // Handle cooldown in localStorage
+            const cooldownTime = Date.now() + 60000; // 1 minute
+            localStorage.setItem(`email_cooldown_${currentRegistrantId}`, cooldownTime);
+            
             setTimeout(() => {
                 form.submit();
-            }, 600);
-            
-            return false; // Prevent immediate submission
+            }, 800);
         };
 
+        // Cooldown Timer Implementation
+        function checkCooldowns() {
+            const now = Date.now();
+            document.querySelectorAll('.send-btn').forEach(btn => {
+                const id = btn.id.split('-').pop();
+                const expiry = localStorage.getItem(`email_cooldown_${id}`);
+                
+                if (expiry && now < expiry) {
+                    const remaining = Math.ceil((expiry - now) / 1000);
+                    btn.disabled = true;
+                    btn.classList.add('bg-slate-200', 'text-slate-500', 'cursor-not-allowed');
+                    btn.classList.remove('bg-blue-600', 'hover:bg-blue-700', 'text-white');
+                    btn.querySelector('.btn-text').innerText = `Wait ${remaining}s`;
+                } else if (expiry && now >= expiry) {
+                    localStorage.removeItem(`email_cooldown_${id}`);
+                    btn.disabled = false;
+                    btn.classList.remove('bg-slate-200', 'text-slate-500', 'cursor-not-allowed');
+                    btn.classList.add('bg-blue-600', 'hover:bg-blue-700', 'text-white');
+                    btn.querySelector('.btn-text').innerText = `Send`;
+                }
+            });
+        }
+
+        setInterval(checkCooldowns, 1000);
+        window.addEventListener('DOMContentLoaded', checkCooldowns);
+
+        // Close on Esc
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeSendModal();
+        });
+
+        // Initialize Dynamic Island for Flash Messages
+        <?php if (isset($_SESSION['di'])): ?>
+        window.addEventListener('DOMContentLoaded', () => {
+            if (window.DynamicIsland) {
+                const di = <?php echo json_encode($_SESSION['di']); ?>;
+                DynamicIsland.notify(di);
+            }
+        });
+        <?php unset($_SESSION['di']); endif; ?>
+
+        // Action Handlers
         window.handleBulkAction = (action) => {
             const selectedIds = Array.from(rowCheckboxes)
                 .filter(cb => cb.checked)

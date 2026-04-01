@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once 'db.php';
+require_once 'config.php';
 
 // Import PHPMailer classes into the global namespace
 use PHPMailer\PHPMailer\PHPMailer;
@@ -213,7 +214,7 @@ $countsByWebinar = $pdo->query("SELECT webinar_id, COUNT(*) as count FROM regist
         body.dark-theme .prose strong { color: #ffffff !important; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-800 antialiased min-h-screen">
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen overflow-hidden">
 
     <div class="flex h-screen overflow-hidden">
         
