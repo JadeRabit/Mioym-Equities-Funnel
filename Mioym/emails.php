@@ -1,12 +1,6 @@
 <?php
-session_start();
 require_once 'db.php';
 require_once 'config.php';
-
-// Import PHPMailer classes into the global namespace
-use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\SMTP;
-use PHPMailer\PHPMailer\Exception;
 
 // Load Composer's autoloader
 require 'vendor/autoload.php';
@@ -26,151 +20,118 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $single_registrant_id = $_POST['registrant_id'] ?? null; 
         $bulk_ids = $_POST['bulk_ids'] ?? null;
         
-        // Setup PHPMailer
-        $mail = new PHPMailer(true);
-        try {
-            // ... (SMTP settings remain same)
-            $mail->isSMTP();
-            $mail->Host       = 'smtp-relay.brevo.com'; 
-            $mail->SMTPAuth   = true;
-            $mail->Username   = 'a61f36001@smtp-brevo.com'; 
-            $mail->Password   = 'jUmI9RMntaAkbqKN'; 
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS; 
-            $mail->Port       = 587; 
-            $mail->SMTPDebug = SMTP::DEBUG_OFF;
-            $mail->setFrom('mioymequities1@gmail.com', 'Mioym Equities'); 
-            $mail->isHTML(true);
-            
-            // Get Target Registrants
-            $registrantsToSend = [];
-            if ($action === 'send_test_email') {
-                // For test email, just use a dummy registrant or the admin's email if we had it.
-                // For now, let's use a mock registrant.
-                $registrantsToSend[] = [
-                    'id' => 0,
-                    'fullname' => 'Test Investor',
-                    'email' => 'mioymequities1@gmail.com', // Send test to yourself
-                    'webinar_title' => 'Sample Webinar',
-                    'webinar_link' => 'https://zoom.us/test',
-                    'schedule_date&time' => date('Y-m-d H:i:s', strtotime('+1 day'))
-                ];
-            } else {
-                $selectFields = "r.*, w.title as webinar_title, w.webinar_link, w.`schedule_date&time`";
-                if ($bulk_ids) {
-                    $idsArray = explode(',', $bulk_ids);
-                    $placeholders = implode(',', array_fill(0, count($idsArray), '?'));
-                    $stmt = $pdo->prepare("SELECT $selectFields FROM registrants_tbl r LEFT JOIN webinar_tbl w ON r.webinar_id = w.webinar_id WHERE r.id IN ($placeholders)");
-                    $stmt->execute($idsArray);
-                } elseif ($single_registrant_id) {
-                    $stmt = $pdo->prepare("SELECT $selectFields FROM registrants_tbl r LEFT JOIN webinar_tbl w ON r.webinar_id = w.webinar_id WHERE r.id = ?");
-                    $stmt->execute([$single_registrant_id]);
-                } elseif ($webinar_id == 'all') {
-                    $stmt = $pdo->query("SELECT $selectFields FROM registrants_tbl r LEFT JOIN webinar_tbl w ON r.webinar_id = w.webinar_id");
-                } else {
-                    $stmt = $pdo->prepare("SELECT $selectFields FROM registrants_tbl r LEFT JOIN webinar_tbl w ON r.webinar_id = w.webinar_id WHERE r.webinar_id = ?");
-                    $stmt->execute([$webinar_id]);
-                }
-                $registrantsToSend = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            }
-            
-            $sentCount = 0;
-            foreach ($registrantsToSend as $registrant) {
-                if (empty($registrant['email'])) continue;
-
-                $personalLink = $registrant['webinar_link'] ?? 'Link not set yet';
-                
-                // Load enterprise email template
-                $emailTemplate = file_get_contents('email-template.html');
-                
-                // Get webinar details for template
-                $rawDate = $registrant['schedule_date&time'] ?? null;
-                $webinarDate = 'To be announced';
-                if ($rawDate && strtotime($rawDate)) {
-                    $webinarDate = date('F j, Y \a\t g:i A', strtotime($rawDate));
-                }
-                $webinarTitle = $registrant['webinar_title'] ?? 'Exclusive Webinar';
-                
-                // Replace the [Content] placeholder if it exists in the template
-                // Or just use the template as is and replace our custom tags.
-                // In our email-template.html, we have a fixed structure.
-                // We'll replace the greeting and main message area with the dynamic content from the editor.
-                
-                // Replace template variables
-                $body = str_replace(
-                    [
-                        '[Name]', 
-                        '[Link]',
-                        '[WebinarDate]',
-                        '[WebinarTitle]',
-                        '[CompanyAddress]',
-                        '[UnsubscribeLink]',
-                        '[PrivacyPolicy]'
-                    ],
-                    [
-                        htmlspecialchars($registrant['fullname']), 
-                        htmlspecialchars($personalLink),
-                        htmlspecialchars($webinarDate),
-                        htmlspecialchars($webinarTitle),
-                        '123 Business District, Makati City, Philippines 1200',
-                        'https://mioym.com/unsubscribe',
-                        'https://mioym.com/privacy'
-                    ],
-                    $emailTemplate
-                );
-
-                // ALSO replace the dynamic content from the editor which might have tags too
-                $dynamicContent = str_replace(
-                    ['[Name]', '[Link]', '[WebinarDate]', '[WebinarTitle]'],
-                    [htmlspecialchars($registrant['fullname']), htmlspecialchars($personalLink), htmlspecialchars($webinarDate), htmlspecialchars($webinarTitle)],
-                    $email_template_content
-                );
-
-                // Note: Our template currently doesn't have a place for $dynamicContent.
-                // I should add a [MessageContent] tag to the template.
-                // For now, I'll just replace the Hello [Name] part.
-                
-                $mail->clearAddresses();
-                $mail->addAddress($registrant['email'], $registrant['fullname']);
-                
-                $mail->Subject = $subject;
-                $mail->Body    = $body;
-
-                if ($mail->send()) {
-                    if ($action !== 'send_test_email') {
-                        $updateStmt = $pdo->prepare("UPDATE registrants_tbl SET email_sent = 1 WHERE id = ?");
-                        $updateStmt->execute([$registrant['id']]);
-                    }
-                    $sentCount++;
-                }
-            }
-            
-            if ($action === 'send_test_email') {
-                $_SESSION['flash'] = "Test email sent successfully to your inbox!";
-            } elseif ($bulk_ids) {
-                $_SESSION['flash'] = "Successfully blasted emails to $sentCount selected registrants!";
+        // Pre-load enterprise email template for efficiency
+        $emailTemplateBase = file_exists('email-template.html') ? file_get_contents('email-template.html') : '<html><body>[MessageContent]</body></html>';
+        
+        // Get Target Registrants
+        $registrantsToSend = [];
+        if ($action === 'send_test_email') {
+            $registrantsToSend[] = [
+                'id' => 0,
+                'fullname' => 'Test Investor',
+                'email' => 'mioymequities1@gmail.com', // Send test to yourself
+                'webinar_title' => 'Sample Webinar',
+                'webinar_link' => 'https://zoom.us/test',
+                'duration' => '60-minute',
+                'schedule_date&time' => date('Y-m-d H:i:s', strtotime('+1 day'))
+            ];
+        } else {
+            $selectFields = "r.*, w.title as webinar_title, w.webinar_link, w.`schedule_date&time`, w.duration";
+            if ($bulk_ids) {
+                $idsArray = explode(',', $bulk_ids);
+                $placeholders = implode(',', array_fill(0, count($idsArray), '?'));
+                $stmt = $pdo->prepare("SELECT $selectFields FROM registrants_tbl r LEFT JOIN webinar_tbl w ON r.webinar_id = w.webinar_id WHERE r.id IN ($placeholders)");
+                $stmt->execute($idsArray);
             } elseif ($single_registrant_id) {
-                $_SESSION['flash'] = "Email sent successfully to {$registrantsToSend[0]['fullname']}!";
+                $stmt = $pdo->prepare("SELECT $selectFields FROM registrants_tbl r LEFT JOIN webinar_tbl w ON r.webinar_id = w.webinar_id WHERE r.id = ?");
+                $stmt->execute([$single_registrant_id]);
+            } elseif ($webinar_id == 'all') {
+                $stmt = $pdo->query("SELECT $selectFields FROM registrants_tbl r LEFT JOIN webinar_tbl w ON r.webinar_id = w.webinar_id");
             } else {
-                $_SESSION['flash'] = "Successfully blasted emails to $sentCount registrants!";
+                $stmt = $pdo->prepare("SELECT $selectFields FROM registrants_tbl r LEFT JOIN webinar_tbl w ON r.webinar_id = w.webinar_id WHERE r.webinar_id = ?");
+                $stmt->execute([$webinar_id]);
             }
-            if ($action !== 'send_test_email' && function_exists('admin_notify')) {
-                $aud = $webinar_id === 'all' ? 'All registrants' : 'Selected audience';
-                admin_notify($pdo, 'emails', 'Email Campaign Sent', $sentCount . ' emails sent (' . $aud . ').', 'emails.php');
-            }
-            $_SESSION['di'] = ['type'=>'success','title'=>'Emails','message'=>$_SESSION['flash']];
-        } catch (Exception $e) {
-            $_SESSION['flash'] = "Email sending failed. Mailer Error: {$mail->ErrorInfo}";
-            $_SESSION['di'] = ['type'=>'error','title'=>'Emails','message'=>$_SESSION['flash']];
+            $registrantsToSend = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
         
-        // Redirect back to referring page
-        if ($action === 'send_test_email') {
-            header("Location: emails.php");
-        } else {
-            $redirect = ($single_registrant_id || $bulk_ids) ? 'registrants.php' : 'emails.php';
-            header("Location: $redirect");
+        $sentCount = 0;
+        foreach ($registrantsToSend as $registrant) {
+            if (empty($registrant['email'])) continue;
+
+            $personalLink = $registrant['webinar_link'] ?? 'Link not set yet';
+            $rawDate = $registrant['schedule_date&time'] ?? null;
+            $webinarDate = 'To be announced';
+            if ($rawDate && strtotime($rawDate)) {
+                $webinarDate = date('F j, Y \a\t g:i A', strtotime($rawDate));
+            }
+            $webinarTitle = $registrant['webinar_title'] ?? 'Exclusive Webinar';
+            $webinarDuration = $registrant['duration'] ?? get_setting('webinar_duration', '60-minute');
+            
+            // Replace template variables
+            $body = str_replace(
+                [
+                    '[Name]', 
+                    '[Link]',
+                    '[WebinarDate]',
+                    '[WebinarTitle]',
+                    '[WebinarDuration]',
+                    '[CompanyAddress]',
+                    '[UnsubscribeLink]',
+                    '[PrivacyPolicy]'
+                ],
+                [
+                    htmlspecialchars($registrant['fullname']), 
+                    htmlspecialchars($personalLink),
+                    htmlspecialchars($webinarDate),
+                    htmlspecialchars($webinarTitle),
+                    htmlspecialchars($webinarDuration),
+                    get_setting('office_address', '2900 Westchester Ave Purchase, NY 10577'),
+                    'https://mioym.com/unsubscribe',
+                    'https://mioym.com/privacy'
+                ],
+                $emailTemplateBase
+            );
+
+            // ALSO replace the dynamic content from the editor which might have tags too
+            $dynamicContent = str_replace(
+                ['[Name]', '[Link]', '[WebinarDate]', '[WebinarTitle]', '[WebinarDuration]'],
+                [htmlspecialchars($registrant['fullname']), htmlspecialchars($personalLink), htmlspecialchars($webinarDate), htmlspecialchars($webinarTitle), htmlspecialchars($webinarDuration)],
+                $email_template_content
+            );
+
+            // If the template has a [MessageContent] placeholder, replace it
+            if (strpos($body, '[MessageContent]') !== false) {
+                $body = str_replace('[MessageContent]', $dynamicContent, $body);
+            } else {
+                // Fallback: if no placeholder, just append or replace a common tag
+                $body = str_replace('[Name]', htmlspecialchars($registrant['fullname']), $body);
+                // This logic depends on the actual template structure.
+            }
+
+            $res = send_brevo_api_email($registrant['email'], $registrant['fullname'], $subject, $body);
+
+            if ($res['success']) {
+                $sentCount++;
+                if (isset($registrant['id']) && $registrant['id'] > 0) {
+                    $stmtUpdate = $pdo->prepare("UPDATE registrants_tbl SET email_sent = 1 WHERE id = ?");
+                    $stmtUpdate->execute([$registrant['id']]);
+                }
+                log_email_notification($pdo, $registrant['email'], $subject, 'sent');
+            } else {
+                log_email_notification($pdo, $registrant['email'], $subject, 'failed', $res['error']);
+            }
         }
-        exit;
+        
+        if ($action === 'send_test_email') {
+            echo json_encode(['success' => true, 'message' => "Successfully sent test email."]);
+            exit;
+        } else {
+            $_SESSION['flash'] = "Successfully sent $sentCount emails.";
+            $_SESSION['di'] = ['type' => 'success', 'title' => 'Email Campaign', 'message' => $_SESSION['flash']];
+            $referer = $_SERVER['HTTP_REFERER'] ?? 'registrants.php';
+            header("Location: $referer");
+            exit;
+        }
     }
 }
 
@@ -187,7 +148,8 @@ $countsByWebinar = $pdo->query("SELECT webinar_id, COUNT(*) as count FROM regist
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Email Suite · Mioym Equities</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" type="image/png" href="img/logo.png">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- Quill.js WYSIWYG -->
@@ -413,7 +375,7 @@ $countsByWebinar = $pdo->query("SELECT webinar_id, COUNT(*) as count FROM regist
                                             <div class="space-y-2">
                                                 <p class="text-xs text-slate-600"><strong>Date & Time:</strong> <span x-text="sampleDate"></span></p>
                                                 <p class="text-xs text-slate-600"><strong>Topic:</strong> <span x-text="sampleTitle"></span></p>
-                                                <p class="text-xs text-slate-600"><strong>Duration:</strong> Approximately 60 minutes</p>
+                                                <p class="text-xs text-slate-600"><strong>Duration:</strong> <span x-text="sampleDuration"></span></p>
                                             </div>
                                         </div>
 
@@ -473,6 +435,7 @@ $countsByWebinar = $pdo->query("SELECT webinar_id, COUNT(*) as count FROM regist
                 renderedContent: 'Hi [Name],<br><br>Here is the link to join our webinar: [Link]<br><br>See you there!',
                 sampleDate: 'To be announced',
                 sampleTitle: 'Exclusive Webinar',
+                sampleDuration: '<?php echo get_setting('webinar_duration', '60-minute'); ?>',
                 webinarData: <?php echo json_encode($webinars); ?>,
                 sendingTest: false,
                 testSent: false,
@@ -512,7 +475,8 @@ $countsByWebinar = $pdo->query("SELECT webinar_id, COUNT(*) as count FROM regist
                         .replace(/\[Name\]/g, '<strong>Test Investor</strong>')
                         .replace(/\[Link\]/g, '<a href="#" class="text-blue-600 underline">https://zoom.us/test-link</a>')
                         .replace(/\[WebinarDate\]/g, this.sampleDate)
-                        .replace(/\[WebinarTitle\]/g, this.sampleTitle);
+                        .replace(/\[WebinarTitle\]/g, this.sampleTitle)
+                        .replace(/\[WebinarDuration\]/g, this.sampleDuration);
                 },
 
                 updateCount() {
@@ -521,6 +485,7 @@ $countsByWebinar = $pdo->query("SELECT webinar_id, COUNT(*) as count FROM regist
                         this.selectedWebinarTitle = 'All Registrants (Every webinar)';
                         this.sampleDate = 'To be announced';
                         this.sampleTitle = 'Exclusive Webinar';
+                        this.sampleDuration = '<?php echo get_setting('webinar_duration', '60-minute'); ?>';
                     } else {
                         this.recipientCount = this.counts[this.selectedWebinar] || 0;
                         const select = document.querySelector('select[name="webinar_id"]');
@@ -530,6 +495,7 @@ $countsByWebinar = $pdo->query("SELECT webinar_id, COUNT(*) as count FROM regist
                         const web = this.webinarData.find(w => w.webinar_id === this.selectedWebinar);
                         if (web) {
                             this.sampleTitle = web.title;
+                            this.sampleDuration = web.duration || '60-minute';
                             if (web['schedule_date&time']) {
                                 const d = new Date(web['schedule_date&time']);
                                 this.sampleDate = d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });

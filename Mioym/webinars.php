@@ -1,5 +1,4 @@
 <?php
-session_start();
 require_once 'db.php';
 require_once 'config.php';
 
@@ -170,9 +169,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         
         $host_pic_path = handleUpload('host_pic');
         $webinar_vid_path = handleUpload('webinar_vid');
+        $duration = trim($_POST['duration'] ?? '60-minute');
         
-        $columns = ['title', 'hostname', 'host_pic', 'webinar_vid', 'webinar_id', 'webinar_link', '`schedule_date&time`', 'status'];
-        $values = [$_POST['title'], $_POST['hostname'], $host_pic_path, $webinar_vid_path, $new_webinar_id, $_POST['meeting_link'], $_POST['schedule_date_time'], $status];
+        $columns = ['title', 'hostname', 'host_pic', 'webinar_vid', 'webinar_id', 'webinar_link', '`schedule_date&time`', 'status', 'duration'];
+        $values = [$_POST['title'], $_POST['hostname'], $host_pic_path, $webinar_vid_path, $new_webinar_id, $_POST['meeting_link'], $_POST['schedule_date_time'], $status, $duration];
 
         if ($hasDescription) {
             array_splice($columns, 1, 0, ['description']);
@@ -284,12 +284,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $subheadingBold = (int)$cleanItems[0]['bold'];
         }
         $finalSubheadingItemsJson = !empty($cleanItems) ? json_encode($cleanItems, JSON_UNESCAPED_UNICODE) : null;
+        $duration = trim($_POST['duration'] ?? '60-minute');
+
         if ($hasDescription) {
-            $updateQuery = "UPDATE webinar_tbl SET title=?, description=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?";
-            $params = [$_POST['title'], $description, $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status']];
+            $updateQuery = "UPDATE webinar_tbl SET title=?, description=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?, duration=?";
+            $params = [$_POST['title'], $description, $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status'], $duration];
         } else {
-            $updateQuery = "UPDATE webinar_tbl SET title=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?";
-            $params = [$_POST['title'], $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status']];
+            $updateQuery = "UPDATE webinar_tbl SET title=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?, duration=?";
+            $params = [$_POST['title'], $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status'], $duration];
         }
         if ($hasHostDescription) {
             $updateQuery .= ", host_description=?";
@@ -391,7 +393,8 @@ function webinar_subheading_font_stack($key) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Webinars · Mioym Equities</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" type="image/png" href="img/logo.png">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
@@ -611,6 +614,7 @@ function webinar_subheading_font_stack($key) {
                                                 data-schedule="<?php echo date('Y-m-d\\TH:i', strtotime($w['schedule_date&time'])); ?>"
                                                 data-link="<?php echo htmlspecialchars($w['webinar_link'] ?? ''); ?>"
                                                 data-status="<?php echo strtolower($w['status'] ?? 'inactive'); ?>"
+                                                data-duration="<?php echo htmlspecialchars($w['duration'] ?? '60-minute'); ?>"
                                                 title="Edit Webinar"
                                             >
                                                 <i class="fas fa-pen"></i>
@@ -688,171 +692,194 @@ function webinar_subheading_font_stack($key) {
                     <div class="absolute inset-0 overflow-hidden">
                         <div class="pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10 sm:pl-16">
                             <!-- Slide-over panel -->
-                            <div x-show="showAddModal" @click.away="showAddModal = false" x-transition:enter="transform transition ease-in-out duration-500 sm:duration-700" x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0" x-transition:leave="transform transition ease-in-out duration-500 sm:duration-700" x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full" class="pointer-events-auto w-screen max-w-md">
-                                <div class="flex h-full flex-col overflow-y-scroll bg-white shadow-2xl">
+                            <div x-show="showAddModal" @click.away="showAddModal = false" x-transition:enter="transform transition ease-in-out duration-500 sm:duration-700" x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0" x-transition:leave="transform transition ease-in-out duration-500 sm:duration-700" x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full" class="pointer-events-auto w-screen max-w-lg">
+                                <div class="flex h-full flex-col overflow-y-scroll bg-white dark:bg-slate-900 shadow-2xl border-l border-slate-100 dark:border-slate-800">
                                     
                                     <!-- Header -->
-                                    <div class="bg-slate-50 px-6 py-6 border-b border-slate-100 sm:px-8 sticky top-0 z-10 flex items-center justify-between">
+                                    <div class="px-6 py-8 border-b border-slate-100 dark:border-slate-800 sm:px-8 sticky top-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md z-10 flex items-center justify-between">
                                         <div>
-                                            <h2 class="text-xl font-bold text-slate-800" id="slide-over-title">Add New Webinar</h2>
-                                            <p class="text-sm text-slate-500 mt-1">Fill in the details to schedule a new event.</p>
+                                            <h2 class="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight" id="slide-over-title">Add New Webinar</h2>
+                                            <p class="text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">Configure your event details and broadcast settings.</p>
                                         </div>
-                                        <button @click="showAddModal = false" type="button" class="relative rounded-xl p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors focus:outline-none">
+                                        <button @click="showAddModal = false" type="button" class="relative rounded-xl p-2.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100 transition-all focus:outline-none">
                                             <i class="fas fa-times text-xl"></i>
                                         </button>
                                     </div>
 
                                     <!-- Form Body -->
-                                    <div class="relative flex-1 px-6 py-6 sm:px-8">
-                                        <form method="POST" enctype="multipart/form-data" class="space-y-6" id="addWebinarForm">
+                                    <div class="relative flex-1 px-6 pt-10 pb-32 sm:px-8">
+                                        <form method="POST" enctype="multipart/form-data" class="space-y-12" id="addWebinarForm">
                                             <input type="hidden" name="action" value="add_webinar">
                                             
-                                            <!-- Core Info -->
-                                            <div class="space-y-4">
-                                                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Core Details</h3>
+                                            <!-- Section 1: Basic Info -->
+                                            <div class="p-6 rounded-2xl bg-slate-50/50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 space-y-6">
+                                                <div class="flex items-center gap-2 mb-2">
+                                                    <span class="w-1.5 h-4 bg-blue-600 rounded-full"></span>
+                                                    <h3 class="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-widest">Basic Information</h3>
+                                                </div>
                                                 
                                                 <div>
-                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Webinar Title <span class="text-rose-500">*</span></label>
-                                                    <input type="text" name="title" required placeholder="e.g., Q3 Market Analysis" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400">
+                                                    <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Webinar Title <span class="text-rose-500">*</span></label>
+                                                    <input type="text" name="title" required placeholder="e.g., Q3 2026 Investment Strategy" class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 font-medium">
                                                 </div>
 
                                                 <div>
-                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Subheadings</label>
-                                                    <input type="hidden" name="subheading" id="addSubheadingHidden">
-                                                    <input type="hidden" name="subheading_items_json" id="addSubheadingItemsJson">
-                                                    <div id="addSubheadingItems" class="space-y-3">
-                                                        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 subheading-item">
-                                                            <input type="text" class="subheading-item-text w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] outline-none text-sm text-slate-800 placeholder-slate-400" placeholder="Enter subheading">
-                                                            <div class="mt-3 grid grid-cols-1 sm:grid-cols-5 gap-3">
-                                                                <div class="sm:col-span-2">
-                                                                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Font</label>
-                                                                    <select class="subheading-item-font w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] outline-none text-sm text-slate-800">
-                                                                        <option value="system_sans">System Sans</option>
-                                                                        <option value="system_serif">System Serif</option>
-                                                                        <option value="system_mono">System Mono</option>
-                                                                        <option value="arial">Arial</option>
-                                                                        <option value="georgia">Georgia</option>
-                                                                        <option value="times">Times New Roman</option>
-                                                                        <option value="courier">Courier New</option>
-                                                                        <option value="verdana">Verdana</option>
-                                                                        <option value="trebuchet">Trebuchet MS</option>
-                                                                    </select>
-                                                                </div>
-                                                                <div>
-                                                                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Size</label>
-                                                                    <input type="number" min="10" max="80" value="20" class="subheading-item-size w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] outline-none text-sm text-slate-800">
-                                                                </div>
-                                                                <div>
-                                                                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Color</label>
-                                                                    <input type="color" value="#ffffff" class="subheading-item-color w-full h-[42px] px-2 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a]">
-                                                                </div>
-                                                                <div class="flex items-end justify-between gap-2">
-                                                                    <label class="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
-                                                                        <input type="checkbox" class="subheading-item-bold w-4 h-4 rounded border-slate-300 text-[#1e4a7a] focus:ring-[#1e4a7a]/30" checked>
-                                                                        Bold
-                                                                    </label>
-                                                                    <button type="button" class="subheading-item-remove px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" data-sub-item-remove disabled>Remove</button>
-                                                                </div>
+                                                    <div class="flex items-center justify-between mb-2">
+                                                        <label class="block text-sm font-bold text-slate-900 dark:text-slate-300">Description</label>
+                                                    </div>
+                                                    <textarea name="description" id="addWebinarDesc" rows="4" placeholder="Provide a brief overview of the webinar agenda..." class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 resize-none font-medium leading-relaxed"></textarea>
+                                                </div>
+                                            </div>
+
+                                            <!-- Section 2: Dynamic Subheadings -->
+                                            <div class="space-y-6">
+                                                <div class="flex items-center gap-2 mb-2">
+                                                    <span class="w-1.5 h-4 bg-indigo-600 rounded-full"></span>
+                                                    <h3 class="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-widest">Dynamic Subheadings</h3>
+                                                </div>
+                                                
+                                                <input type="hidden" name="subheading" id="addSubheadingHidden">
+                                                <input type="hidden" name="subheading_items_json" id="addSubheadingItemsJson">
+                                                
+                                                <div id="addSubheadingItems" class="space-y-4">
+                                                    <!-- Subheading items will be injected here via JS -->
+                                                </div>
+
+                                                <button type="button" class="group w-full py-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-indigo-500/50 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/20 transition-all flex flex-col items-center justify-center gap-1" data-sub-item-add>
+                                                    <div class="w-8 h-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 group-hover:text-indigo-600 group-hover:border-indigo-200 transition-all">
+                                                        <i class="fas fa-plus text-xs"></i>
+                                                    </div>
+                                                    <span class="text-xs font-bold text-slate-500 dark:text-slate-400 group-hover:text-indigo-600 uppercase tracking-wider transition-all">Add Subheading</span>
+                                                </button>
+                                            </div>
+
+                                            <!-- Section 3: Logistics -->
+                                            <div class="p-6 rounded-2xl bg-slate-50/50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 space-y-6">
+                                                <div class="flex items-center gap-2 mb-2">
+                                                    <span class="w-1.5 h-4 bg-emerald-600 rounded-full"></span>
+                                                    <h3 class="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-widest">Logistics & Schedule</h3>
+                                                </div>
+
+                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                                    <div>
+                                                        <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Schedule <span class="text-rose-500">*</span></label>
+                                                        <div class="relative">
+                                                            <input type="datetime-local" name="schedule_date_time" required class="w-full pl-4 pr-10 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all outline-none text-sm text-slate-800 dark:text-slate-200 font-medium">
+                                                            <div class="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">
+                                                                <i class="far fa-calendar-alt text-sm"></i>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                    <button type="button" class="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition" data-sub-item-add>
-                                                        + Add subheading
-                                                    </button>
-                                                </div>
-
-                                                <div>
-                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5"></label>Description</label>
-                                                    <textarea name="description" rows="4" placeholder="Short summary or agenda for this webinar..." class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400 resize-none"></textarea>
-                                                </div>
-
-                                                <div class="grid grid-cols-2 gap-4">
-                                                    <div>
-                                                        <label class="block text-sm font-semibold text-slate-700 mb-1.5">Schedule <span class="text-rose-500">*</span></label>
-                                                        <input type="datetime-local" name="schedule_date_time" required class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800">
+                                                        <p class="text-[10px] font-bold text-slate-400 mt-2 uppercase tracking-tight">
+                                                            Timezone: <span id="addScheduleTz">Detecting...</span>
+                                                        </p>
                                                     </div>
                                                     <div>
-                                                        <label class="block text-sm font-semibold text-slate-700 mb-1.5">Status</label>
-                                                        <select name="status" class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 appearance-none">
+                                                        <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Duration</label>
+                                                        <input type="text" name="duration" placeholder="e.g., 60-minute" value="60-minute" class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all outline-none text-sm text-slate-800 dark:text-slate-200 font-medium">
+                                                    </div>
+                                                </div>
+
+                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                                    <div>
+                                                        <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Status</label>
+                                                        <select name="status" class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all outline-none text-sm text-slate-800 dark:text-slate-200 font-bold appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20fill%3D%27none%27%20viewBox%3D%270%200%2020%2020%27%3E%3Cpath%20stroke%3D%27%236b7280%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%20stroke-width%3D%271.5%27%20d%3D%27m6%208%204%204%204-4%27%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem_1.25rem] bg-[right_0.5rem_center] bg-no-repeat">
                                                             <option value="upcoming">Upcoming</option>
                                                             <option value="active">Active (Live)</option>
                                                             <option value="inactive">Inactive</option>
                                                         </select>
                                                     </div>
-                                                </div>
-
-                                                <div>
-                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Meeting Link <span class="text-rose-500">*</span></label>
-                                                    <div class="relative">
-                                                        <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                                                            <i class="fas fa-link text-slate-400 text-sm"></i>
+                                                    <div>
+                                                        <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Meeting Link <span class="text-rose-500">*</span></label>
+                                                        <div class="relative group">
+                                                            <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                                                <i class="fas fa-link text-slate-400 text-sm group-focus-within:text-emerald-500 transition-colors"></i>
+                                                            </div>
+                                                            <input type="url" name="meeting_link" required placeholder="https://zoom.us/j/..." class="w-full pl-11 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 transition-all outline-none text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 font-medium">
                                                         </div>
-                                                        <input type="url" name="meeting_link" required placeholder="https://zoom.us/j/..." class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400">
                                                     </div>
                                                 </div>
                                             </div>
 
-                                            <hr class="border-slate-100">
-
                                             <!-- Host & Media -->
-                                            <div class="space-y-4">
-                                                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Host & Media</h3>
+                                            <div class="p-6 mb-5 rounded-2xl bg-slate-50/50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 space-y-6">
+                                                <div class="flex items-center gap-2 mb-2">
+                                                    <span class="w-1.5 h-4 bg-slate-600 rounded-full"></span>
+                                                    <h3 class="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-widest">Host & Media Assets</h3>
+                                                </div>
                                                 
                                                 <div>
-                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Host Name</label>
-                                                    <div class="relative">
-                                                        <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                                                            <i class="fas fa-id-badge text-slate-400 text-sm"></i>
+                                                    <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Host Name</label>
+                                                    <div class="relative group">
+                                                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                                            <i class="fas fa-id-badge text-slate-400 text-sm group-focus-within:text-slate-600 transition-colors"></i>
                                                         </div>
-                                                        <input type="text" name="hostname" placeholder="John Doe" class="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400">
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Host Description</label>
-                                                    <textarea name="host_description" rows="3" placeholder="Short bio or host description..." class="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a] focus:bg-white transition-all outline-none text-sm text-slate-800 placeholder-slate-400 resize-none"></textarea>
-                                                </div>
-
-                                                <div>
-                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Host Avatar <span class="text-xs font-normal text-slate-400">(Optional)</span></label>
-                                                    <div class="mt-1 flex justify-center rounded-xl border border-dashed border-slate-300 px-6 py-6 bg-slate-50 hover:bg-slate-100 transition-colors">
-                                                        <div class="text-center">
-                                                            <i class="fas fa-image text-3xl text-slate-300 mb-2"></i>
-                                                            <div class="flex text-sm leading-6 text-slate-600 justify-center">
-                                                                <label class="relative cursor-pointer rounded-md font-semibold text-[#1e4a7a] focus-within:outline-none hover:text-[#15365a]">
-                                                                    <span>Upload a file</span>
-                                                                    <input type="file" name="host_pic" accept="image/*" class="sr-only">
-                                                                </label>
-                                                            </div>
-                                                            <p class="text-xs text-slate-500">PNG, JPG up to 2MB</p>
-                                                        </div>
+                                                        <input type="text" name="hostname" placeholder="e.g., John Doe" class="w-full pl-11 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-slate-500/10 focus:border-slate-500 transition-all outline-none text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 font-medium">
                                                     </div>
                                                 </div>
 
                                                 <div>
-                                                    <label class="block text-sm font-semibold text-slate-700 mb-1.5">Webinar Video <span class="text-xs font-normal text-slate-400">(Optional MP4)</span></label>
-                                                    <div class="mt-1 flex justify-center rounded-xl border border-dashed border-slate-300 px-6 py-6 bg-slate-50 hover:bg-slate-100 transition-colors">
-                                                        <div class="text-center">
-                                                            <i class="fas fa-file-video text-3xl text-slate-300 mb-2"></i>
-                                                            <div class="flex text-sm leading-6 text-slate-600 justify-center">
-                                                                <label class="relative cursor-pointer rounded-md font-semibold text-rose-500 focus-within:outline-none hover:text-rose-600">
-                                                                    <span>Upload video</span>
-                                                                    <input type="file" name="webinar_vid" accept="video/mp4,video/x-m4v,video/*" class="sr-only">
-                                                                </label>
+                                                    <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Host Description</label>
+                                                    <textarea name="host_description" rows="3" placeholder="Provide a brief bio or professional description of the host..." class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-slate-500/10 focus:border-slate-500 transition-all outline-none text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 resize-none font-medium leading-relaxed"></textarea>
+                                                </div>
+                                                
+                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                                    <div>
+                                                        <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Host Avatar</label>
+                                                        <label class="group relative flex justify-center rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 px-4 py-6 bg-white dark:bg-slate-800 hover:border-slate-400 dark:hover:border-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-all cursor-pointer overflow-hidden">
+                                                            <div class="text-center relative z-10">
+                                                                <i class="fas fa-image text-2xl text-slate-300 dark:text-slate-600 mb-2 group-hover:text-slate-400 transition-colors"></i>
+                                                                <div class="text-xs font-bold text-slate-600 dark:text-slate-400">Upload Image</div>
+                                                                <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-tight">PNG, JPG (2MB)</p>
                                                             </div>
-                                                            <p class="text-xs text-slate-500">MP4 up to 50MB</p>
+                                                            <input type="file" name="host_pic" id="addHostPic" accept="image/*" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+                                                        </label>
+                                                        <div id="addHostPicPreview" class="mt-4 hidden p-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
+                                                            <img id="addHostPicImg" class="h-12 w-12 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shadow-sm" alt="Preview">
+                                                            <div class="flex flex-col">
+                                                                <span class="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Image Ready</span>
+                                                                <span id="addHostPicName" class="text-xs font-bold text-slate-700 dark:text-slate-200 truncate max-w-[120px]">filename.jpg</span>
+                                                            </div>
+                                                            <button type="button" id="addHostPicRemove" class="ml-auto w-8 h-8 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all">
+                                                                <i class="fas fa-times-circle"></i>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    <div>
+                                                        <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Webinar Video</label>
+                                                        <label class="group relative flex justify-center rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 px-4 py-6 bg-white dark:bg-slate-800 hover:border-rose-400 hover:bg-rose-50/30 dark:hover:bg-rose-900/10 transition-all cursor-pointer overflow-hidden">
+                                                            <div class="text-center relative z-10">
+                                                                <i class="fas fa-play-circle text-2xl text-slate-300 dark:text-slate-600 mb-2 group-hover:text-rose-500 transition-colors"></i>
+                                                                <div class="text-xs font-bold text-slate-600 dark:text-slate-400 group-hover:text-rose-700 transition-colors">Upload MP4</div>
+                                                                <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-tight">MP4 (50MB)</p>
+                                                            </div>
+                                                            <input type="file" name="webinar_vid" id="addWebinarVid" accept="video/mp4,video/x-m4v,video/*" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+                                                        </label>
+                                                        <div id="addWebinarVidPreview" class="mt-4 hidden p-3 rounded-2xl bg-white dark:bg-slate-800 border border-rose-100 dark:border-rose-900/30 flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
+                                                            <div class="w-12 h-12 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-900/30 flex items-center justify-center text-rose-500">
+                                                                <i class="fas fa-file-video text-xl"></i>
+                                                            </div>
+                                                            <div class="flex flex-col">
+                                                                <span class="text-[10px] font-bold text-rose-600 uppercase tracking-widest">Video Ready</span>
+                                                                <span id="addWebinarVidName" class="text-xs font-bold text-slate-700 dark:text-slate-200 truncate max-w-[120px]">video.mp4</span>
+                                                            </div>
+                                                            <button type="button" id="addWebinarVidRemove" class="ml-auto w-8 h-8 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-all">
+                                                                <i class="fas fa-times-circle"></i>
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 </div>
+                                            </div>
                                             </div>
                                         </form>
                                     </div>
 
                                     <!-- Footer Actions -->
-                                    <div class="border-t border-slate-100 px-6 py-5 sm:px-8 bg-white sticky bottom-0 z-10 flex items-center justify-end gap-3">
-                                        <button @click="showAddModal = false" type="button" class="rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 transition-colors">
+                                    <div class="px-6 py-6 border-t border-slate-100 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky bottom-0 z-10 flex items-center justify-end gap-4 shadow-[0_-10px_30px_rgba(0,0,0,0.03)]">
+                                        <button @click="showAddModal = false" type="button" class="px-6 py-3 text-sm font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors">
                                             Cancel
                                         </button>
-                                        <button type="submit" form="addWebinarForm" class="rounded-xl bg-[#1e4a7a] px-6 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#15365a] transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 flex items-center gap-2">
+                                        <button type="submit" form="addWebinarForm" class="rounded-2xl bg-blue-600 px-8 py-3 text-sm font-bold text-white shadow-xl shadow-blue-600/20 hover:bg-blue-700 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center gap-2">
                                             <i class="fas fa-save"></i> Save Webinar
                                         </button>
                                     </div>
@@ -868,113 +895,192 @@ function webinar_subheading_font_stack($key) {
 
     <!-- Edit Webinar Modal -->
     <div id="editWebinarModal" 
-         class="fixed inset-0 z-[150] overflow-y-auto hidden" 
-         aria-labelledby="modal-title" role="dialog" aria-modal="true">
+         class="relative z-[9999]" 
+         aria-labelledby="modal-title" role="dialog" aria-modal="true" x-data="{ showEditModal: false }" @open-edit-modal.window="showEditModal = true" @close-edit-modal.window="showEditModal = false" x-show="showEditModal" x-cloak>
         
-        <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <!-- Background overlay -->
-            <div id="modalOverlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity opacity-0"></div>
+        <div x-show="showEditModal" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"></div>
 
-            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+        <div class="fixed inset-0 overflow-hidden">
+            <div class="absolute inset-0 overflow-hidden">
+                <div class="pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10">
+                    <!-- Slide-over panel -->
+                    <div x-show="showEditModal" @click.away="showEditModal = false" x-transition:enter="transform transition ease-in-out duration-500 sm:duration-700" x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0" x-transition:leave="transform transition ease-in-out duration-500 sm:duration-700" x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full" class="pointer-events-auto w-screen max-w-lg">
+                        <div class="flex h-full flex-col overflow-y-scroll bg-white dark:bg-slate-900 shadow-2xl border-l border-slate-100 dark:border-slate-800">
+                            
+                            <div class="px-6 py-8 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between sticky top-0 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md z-10">
+                                <div class="flex items-center gap-4">
+                                    <div class="flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-600/10 border border-blue-600/20 text-blue-600">
+                                        <i class="fas fa-pen text-lg"></i>
+                                    </div>
+                                    <div>
+                                        <h3 class="text-xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100" id="modal-title">Edit Webinar</h3>
+                                        <p class="text-xs font-medium text-slate-500 dark:text-slate-400 mt-1">Update broadcast settings and media assets.</p>
+                                    </div>
+                                </div>
+                                <button type="button" id="editCloseBtn" class="w-10 h-10 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 flex items-center justify-center transition-all"><i class="fas fa-times"></i></button>
+                            </div>
 
-            <!-- Modal panel -->
-            <div id="modalPanel" class="inline-block align-bottom bg-white dark:bg-slate-900 rounded-3xl text-left overflow-hidden shadow-[0_24px_64px_rgba(2,6,23,0.35)] border border-slate-200/70 dark:border-slate-800/60 transform transition-all sm:my-8 sm:align-middle sm:max-w-xl w-full opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95">
-                
-                <div class="bg-gradient-to-b from-white/70 to-white dark:from-slate-900/60 dark:to-slate-900 px-6 pt-6 pb-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                    <div class="flex items-center gap-3">
-                        <div class="flex items-center justify-center w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600">
-                            <i class="fas fa-pen"></i>
-                        </div>
-                        <div>
-                            <h3 class="text-[1.1rem] font-extrabold tracking-tight text-slate-800 dark:text-slate-100" id="modal-title">Edit Webinar</h3>
-                            <p class="text-xs text-slate-500 mt-0.5">Update details and media then save changes</p>
+                            <div class="relative flex-1 px-6 pt-10 pb-32 sm:px-8">
+                                <form method="POST" id="editWebinarForm" enctype="multipart/form-data" class="space-y-12">
+                                    <input type="hidden" name="action" value="edit_webinar">
+                                    <input type="hidden" name="webinar_id" id="modalWebinarId">
+                                    
+                                    <!-- Section 1: Basic Info -->
+                                    <div class="p-6 rounded-2xl bg-slate-50/50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 space-y-6">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <span class="w-1.5 h-4 bg-blue-600 rounded-full"></span>
+                                            <h3 class="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-widest">Basic Information</h3>
+                                        </div>
+
+                                        <div>
+                                            <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Webinar Title <span class="text-rose-500">*</span></label>
+                                            <input type="text" name="title" id="modalTitle" required class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all text-sm font-medium text-slate-800 dark:text-slate-200" placeholder="e.g., Q3 2026 Investment Strategy">
+                                        </div>
+
+                                        <div>
+                                            <div class="flex items-center justify-between mb-2">
+                                                <label class="block text-sm font-bold text-slate-900 dark:text-slate-300">Description</label>
+                                            </div>
+                                            <textarea name="description" id="modalDescription" rows="4" class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all resize-none text-sm font-medium text-slate-800 dark:text-slate-200 leading-relaxed" placeholder="Provide a brief overview..."></textarea>
+                                        </div>
+                                    </div>
+
+                                    <!-- Section 2: Dynamic Subheadings -->
+                                    <div class="space-y-6">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <span class="w-1.5 h-4 bg-indigo-600 rounded-full"></span>
+                                            <h3 class="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-widest">Dynamic Subheadings</h3>
+                                        </div>
+                                        
+                                        <input type="hidden" name="subheading" id="modalSubheadingHidden">
+                                        <input type="hidden" name="subheading_items_json" id="modalSubheadingItemsJson">
+                                        
+                                        <div id="modalSubheadingItems" class="space-y-4"></div>
+
+                                        <button type="button" class="group w-full py-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 hover:border-indigo-500/50 hover:bg-indigo-50/30 transition-all flex flex-col items-center justify-center gap-1" data-sub-item-add>
+                                            <div class="w-8 h-8 rounded-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 group-hover:text-indigo-600 group-hover:border-indigo-200 transition-all">
+                                                <i class="fas fa-plus text-xs"></i>
+                                            </div>
+                                            <span class="text-xs font-bold text-slate-500 dark:text-slate-400 group-hover:text-indigo-600 uppercase tracking-wider transition-all">Add Subheading</span>
+                                        </button>
+                                    </div>
+
+                                    <!-- Section 3: Host Details -->
+                                    <div class="p-6 rounded-2xl bg-slate-50/50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 space-y-6">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <span class="w-1.5 h-4 bg-slate-600 rounded-full"></span>
+                                            <h3 class="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-widest">Host Profile</h3>
+                                        </div>
+
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                            <div>
+                                                <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Host Name</label>
+                                                <input type="text" name="hostname" id="modalHostname" class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-slate-500/10 focus:border-slate-500 outline-none text-sm font-medium text-slate-800 dark:text-slate-200" placeholder="e.g., Jane Doe">
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Host Avatar</label>
+                                                <label class="group relative flex justify-center rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 px-4 py-6 bg-white dark:bg-slate-800 hover:border-slate-400 dark:hover:border-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-all cursor-pointer overflow-hidden">
+                                                    <div class="text-center relative z-10">
+                                                        <i class="fas fa-image text-2xl text-slate-300 dark:text-slate-600 mb-2 group-hover:text-slate-400 transition-colors"></i>
+                                                        <div class="text-xs font-bold text-slate-600 dark:text-slate-400">Update Avatar</div>
+                                                        <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-tight">PNG, JPG (2MB)</p>
+                                                    </div>
+                                                    <input type="file" name="host_pic" accept="image/*" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+                                                </label>
+                                                <div id="currentHostPic" class="mt-4 flex items-center gap-4 hidden p-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                                                    <img id="hostPicPreview" class="h-12 w-12 rounded-xl object-cover border border-slate-200 dark:border-slate-700 shadow-sm" alt="Current Host">
+                                                    <div class="flex flex-col">
+                                                        <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Current Active</span>
+                                                        <a id="hostPicLink" target="_blank" class="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline">Preview Image</a>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div>
+                                            <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Host Description</label>
+                                            <textarea name="host_description" id="modalHostDescription" rows="3" class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-slate-500/10 focus:border-slate-500 outline-none transition-all resize-none text-sm font-medium text-slate-800 dark:text-slate-200" placeholder="Short bio or professional description..."></textarea>
+                                        </div>
+                                    </div>
+
+                                    <!-- Section 4: Assets & Logistics -->
+                                    <div class="p-6 rounded-2xl bg-slate-50/50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700 space-y-6">
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <span class="w-1.5 h-4 bg-emerald-600 rounded-full"></span>
+                                            <h3 class="text-xs font-bold text-slate-900 dark:text-slate-200 uppercase tracking-widest">Broadcast Assets</h3>
+                                        </div>
+
+                                        <div>
+                                            <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Webinar Video</label>
+                                            <label class="group relative flex justify-center rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 px-4 py-6 bg-white dark:bg-slate-800 hover:border-rose-400 hover:bg-rose-50/30 dark:hover:bg-rose-900/10 transition-all cursor-pointer overflow-hidden">
+                                                <div class="text-center relative z-10">
+                                                    <i class="fas fa-play-circle text-2xl text-slate-300 dark:text-slate-600 mb-2 group-hover:text-rose-500 transition-colors"></i>
+                                                    <div class="text-xs font-bold text-slate-600 dark:text-slate-400 group-hover:text-rose-700 transition-colors">Update MP4 Asset</div>
+                                                    <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-tight">MP4 (50MB)</p>
+                                                </div>
+                                                <input type="file" name="webinar_vid" accept="video/mp4,video/x-m4v,video/*" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+                                            </label>
+                                            <div id="currentWebinarVid" class="mt-4 hidden">
+                                                <a id="webinarVidLink" target="_blank" class="inline-flex items-center gap-2 text-xs font-bold text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300 hover:underline bg-rose-50 dark:bg-rose-900/20 px-4 py-2 rounded-xl transition-all border border-rose-100 dark:border-rose-900/30">
+                                                    <i class="fas fa-play-circle"></i> View Current Video Asset
+                                                </a>
+                                            </div>
+                                        </div>
+
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                            <div>
+                                                <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Schedule <span class="text-rose-500">*</span></label>
+                                                <div class="relative">
+                                                    <input type="datetime-local" name="schedule_date_time" id="modalSchedule" required class="w-full pl-4 pr-10 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none text-sm font-medium text-slate-800 dark:text-slate-200">
+                                                    <div class="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">
+                                                        <i class="far fa-calendar-alt text-sm"></i>
+                                                    </div>
+                                                </div>
+                                                <p class="text-[10px] font-bold text-slate-400 mt-2 uppercase tracking-tight">
+                                                    Timezone: <span id="editScheduleTz">Detecting...</span>
+                                                </p>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Duration</label>
+                                                <input type="text" name="duration" id="modalDuration" placeholder="e.g., 60-minute" class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none text-sm font-medium text-slate-800 dark:text-slate-200">
+                                            </div>
+                                        </div>
+
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                            <div>
+                                                <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Status</label>
+                                                <select name="status" id="modalStatus" class="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none text-sm font-bold text-slate-800 dark:text-slate-200 appearance-none bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20fill%3D%27none%27%20viewBox%3D%270%200%2020%2020%27%3E%3Cpath%20stroke%3D%27%236b7280%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%20stroke-width%3D%271.5%27%20d%3D%27m6%208%204%204%204-4%27%2F%3E%3C%2Fsvg%3E')] bg-[length:1.25rem_1.25rem] bg-[right_0.5rem_center] bg-no-repeat">
+                                                    <option value="upcoming">Upcoming</option>
+                                                    <option value="active">Active</option>
+                                                    <option value="inactive">Inactive</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Webinar Link <span class="text-rose-500">*</span></label>
+                                                <div class="relative group">
+                                                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                                                        <i class="fas fa-link text-slate-400 text-sm group-focus-within:text-emerald-500 transition-colors"></i>
+                                                    </div>
+                                                    <input type="url" name="meeting_link" id="modalLink" required class="w-full pl-11 pr-4 py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none text-sm font-medium text-slate-800 dark:text-slate-200" placeholder="https://zoom.us/j/...">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
+                            
+                            <div class="px-6 py-6 border-t border-slate-100 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky bottom-0 z-10 flex items-center justify-end gap-4 shadow-[0_-10px_30px_rgba(0,0,0,0.03)]">
+                                <button type="button" id="modalCancelBtn" class="px-6 py-3 text-sm font-bold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 transition-colors">Cancel</button>
+                                <button type="submit" id="modalSaveBtn" form="editWebinarForm" class="rounded-2xl bg-blue-600 px-8 py-3 text-sm font-bold text-white shadow-xl shadow-blue-600/20 hover:bg-blue-700 hover:-translate-y-0.5 active:translate-y-0 transition-all flex items-center gap-2">
+                                    <span id="modalSaveSpinner" class="hidden w-4 h-4 border-2 border-white/80 border-t-transparent rounded-full animate-spin"></span>
+                                    <span>Save Changes</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <button type="button" id="editCloseBtn" class="w-9 h-9 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500 flex items-center justify-center"><i class="fas fa-times"></i></button>
-                </div>
-                <div class="px-6 py-5">
-                    <form method="POST" id="editWebinarForm" enctype="multipart/form-data" class="space-y-5">
-                        <input type="hidden" name="action" value="edit_webinar">
-                        <input type="hidden" name="webinar_id" id="modalWebinarId">
-                        
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Webinar Title</label>
-                            <input type="text" name="title" id="modalTitle" required class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition" placeholder="Enter webinar title">
-                            <p class="text-xs text-slate-400 mt-1">Use a clear, concise title to help attendees identify your event</p>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Subheadings</label>
-                            <input type="hidden" name="subheading" id="modalSubheadingHidden">
-                            <input type="hidden" name="subheading_items_json" id="modalSubheadingItemsJson">
-                            <div id="modalSubheadingItems" class="space-y-3"></div>
-                            <button type="button" class="mt-3 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition" data-sub-item-add>
-                                + Add subheading
-                            </button>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Description</label>
-                            <textarea name="description" id="modalDescription" rows="4" class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition resize-none" placeholder="Short summary or agenda for this webinar"></textarea>
-                        </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Host Name</label>
-                                <input type="text" name="hostname" id="modalHostname" class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition" placeholder="e.g., Jane Doe">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Host Picture</label>
-                                <div class="flex items-center gap-3">
-                                    <input type="file" name="host_pic" accept="image/*" class="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm bg-slate-50 hover:bg-white transition file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-                                </div>
-                                <div id="currentHostPic" class="mt-3 flex items-center gap-3 hidden">
-                                    <img id="hostPicPreview" class="h-12 w-12 rounded-xl object-cover border border-slate-200 shadow-sm" alt="Current Host">
-                                    <a id="hostPicLink" target="_blank" class="text-xs text-blue-600 hover:underline">View Current Image</a>
-                                </div>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Host Description</label>
-                            <textarea name="host_description" id="modalHostDescription" rows="3" class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition resize-none" placeholder="Short bio or host description"></textarea>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Webinar Video</label>
-                            <input type="file" name="webinar_vid" accept="video/mp4,video/x-m4v,video/*" class="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-sm bg-slate-50 hover:bg-white transition file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-rose-50 file:text-rose-700 hover:file:bg-rose-100">
-                            <div id="currentWebinarVid" class="mt-3 hidden">
-                                <a id="webinarVidLink" target="_blank" class="inline-flex items-center gap-2 text-xs text-rose-600 hover:text-rose-700 hover:underline bg-rose-50 px-3 py-1.5 rounded-xl">
-                                    <i class="fas fa-play-circle"></i> View Current Video
-                                </a>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Schedule</label>
-                            <div class="relative">
-                                <input type="datetime-local" name="schedule_date_time" id="modalSchedule" required class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition">
-                                <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"><i class="far fa-calendar-alt"></i></span>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Webinar Link</label>
-                            <input type="url" name="meeting_link" id="modalLink" required class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-slate-50 hover:bg-white transition" placeholder="https://zoom.us/j/...">
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Status</label>
-                            <select name="status" id="modalStatus" class="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none bg-white">
-                                <option value="upcoming">Upcoming</option>
-                                <option value="active">Active</option>
-                                <option value="inactive">Inactive</option>
-                            </select>
-                        </div>
-                    </form>
-                </div>
-                <div class="bg-slate-50 dark:bg-slate-900/70 px-6 py-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
-                    <button type="button" id="modalCancelBtn" class="px-5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-900/60 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition">Cancel</button>
-                    <button type="submit" id="modalSaveBtn" form="editWebinarForm" class="px-6 py-2 rounded-xl bg-[#1e4a7a] text-white font-semibold hover:bg-[#15365a] transition shadow-sm inline-flex items-center gap-2">
-                        <span id="modalSaveSpinner" class="hidden w-4 h-4 border-2 border-white/80 border-t-transparent rounded-full animate-spin"></span>
-                        <span>Save Changes</span>
-                    </button>
                 </div>
             </div>
         </div>
-    </div>
 
     <div id="uploadProgressOverlay" class="fixed inset-0 z-[260] hidden">
         <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"></div>
@@ -1011,9 +1117,6 @@ function webinar_subheading_font_stack($key) {
     // Modal functionality using vanilla JavaScript
     document.addEventListener('DOMContentLoaded', function() {
         const modal = document.getElementById('editWebinarModal');
-        const overlay = document.getElementById('modalOverlay');
-        const panel = document.getElementById('modalPanel');
-        const cancelBtn = document.getElementById('modalCancelBtn');
         const closeBtn = document.getElementById('editCloseBtn');
         const saveBtn = document.getElementById('modalSaveBtn');
         const saveSpinner = document.getElementById('modalSaveSpinner');
@@ -1028,22 +1131,24 @@ function webinar_subheading_font_stack($key) {
             });
         });
         
-        // Close modal when clicking overlay or cancel button
-        overlay.addEventListener('click', closeModal);
-        cancelBtn.addEventListener('click', closeModal);
+        // Close modal when clicking cancel button
+        const cancelBtn = document.getElementById('modalCancelBtn');
+        if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
         if (closeBtn) closeBtn.addEventListener('click', closeModal);
         
         // Close modal with Escape key
         document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+            if (e.key === 'Escape' && modal && !modal.classList.contains('hidden')) {
                 closeModal();
             }
         });
         
         const focusablesSelector = 'a[href], button:not([disabled]), textarea, input, select';
         function trapFocus(e) {
-            if (modal.classList.contains('hidden')) return;
+            if (modal && modal.classList.contains('hidden')) return;
             if (e.key !== 'Tab') return;
+            const panel = modal.querySelector('.pointer-events-auto'); // Get the actual panel
+            if (!panel) return;
             const nodes = panel.querySelectorAll(focusablesSelector);
             const list = Array.prototype.slice.call(nodes);
             if (!list.length) return;
@@ -1052,19 +1157,26 @@ function webinar_subheading_font_stack($key) {
             if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
             else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
         }
-        panel.addEventListener('keydown', trapFocus);
+        if (modal) modal.addEventListener('keydown', trapFocus);
 
         const form = document.getElementById('editWebinarForm');
-        form.addEventListener('submit', () => {
-            if (saveBtn) saveBtn.disabled = true;
-            if (saveSpinner) saveSpinner.classList.remove('hidden');
-        });
+        if (form) {
+            form.addEventListener('submit', () => {
+                if (saveBtn) saveBtn.disabled = true;
+                if (saveSpinner) saveSpinner.classList.remove('hidden');
+            });
+        }
 
         function openModal(button) {
             // Populate form fields from data attributes
             document.getElementById('modalWebinarId').value = button.dataset.id;
             document.getElementById('modalTitle').value = button.dataset.title;
-            document.getElementById('modalDescription').value = button.dataset.description || '';
+            const modalDesc = document.getElementById('modalDescription');
+            if (modalDesc) {
+                modalDesc.value = button.dataset.description || '';
+                // Trigger character counter update
+                modalDesc.dispatchEvent(new Event('input'));
+            }
             let items = [];
             const rawItems = button.dataset.subheadingItemsJson || '';
             if (rawItems) {
@@ -1090,6 +1202,7 @@ function webinar_subheading_font_stack($key) {
             const hostDescField = document.getElementById('modalHostDescription');
             if (hostDescField) hostDescField.value = button.dataset.hostDescription || '';
             document.getElementById('modalSchedule').value = button.dataset.schedule;
+            document.getElementById('modalDuration').value = button.dataset.duration || '60-minute';
             document.getElementById('modalLink').value = button.dataset.link;
             document.getElementById('modalStatus').value = button.dataset.status;
             
@@ -1099,11 +1212,11 @@ function webinar_subheading_font_stack($key) {
             const hostPicImg = document.getElementById('hostPicPreview');
             const hostPicLink = document.getElementById('hostPicLink');
             
-            if (hostPic) {
+            if (hostPic && hostPicContainer && hostPicImg && hostPicLink) {
                 hostPicImg.src = hostPic;
                 hostPicLink.href = hostPic;
                 hostPicContainer.classList.remove('hidden');
-            } else {
+            } else if (hostPicContainer) {
                 hostPicContainer.classList.add('hidden');
             }
             
@@ -1112,37 +1225,26 @@ function webinar_subheading_font_stack($key) {
             const webinarVidContainer = document.getElementById('currentWebinarVid');
             const webinarVidLink = document.getElementById('webinarVidLink');
             
-            if (webinarVid) {
+            if (webinarVid && webinarVidContainer && webinarVidLink) {
                 webinarVidLink.href = webinarVid;
                 webinarVidContainer.classList.remove('hidden');
-            } else {
+            } else if (webinarVidContainer) {
                 webinarVidContainer.classList.add('hidden');
             }
             
-            // Show modal with animation
-            modal.classList.remove('hidden');
+            // Show modal using custom event for Alpine.js
+            window.dispatchEvent(new CustomEvent('open-edit-modal'));
             setTimeout(() => {
-                overlay.classList.remove('opacity-0');
-                overlay.classList.add('opacity-100');
-                panel.classList.remove('opacity-0', 'translate-y-4', 'sm:scale-95');
-                panel.classList.add('opacity-100', 'translate-y-0', 'sm:scale-100');
                 const firstField = document.getElementById('modalTitle');
                 if (firstField) firstField.focus();
-            }, 10);
+            }, 100);
         }
         
         function closeModal() {
-            // Hide modal with animation
-            overlay.classList.remove('opacity-100');
-            overlay.classList.add('opacity-0');
-            panel.classList.remove('opacity-100', 'translate-y-0', 'sm:scale-100');
-            panel.classList.add('opacity-0', 'translate-y-4', 'sm:scale-95');
-            
-            setTimeout(() => {
-                modal.classList.add('hidden');
-                if (saveBtn) saveBtn.disabled = false;
-                if (saveSpinner) saveSpinner.classList.add('hidden');
-            }, 300);
+            // Hide modal using custom event for Alpine.js
+            window.dispatchEvent(new CustomEvent('close-edit-modal'));
+            if (saveBtn) saveBtn.disabled = false;
+            if (saveSpinner) saveSpinner.classList.add('hidden');
         }
     });
     </script>
@@ -1303,43 +1405,53 @@ function webinar_subheading_font_stack($key) {
           }
 
           function itemTemplate(item, theme) {
-            const opts = fontOptions.map(o => `<option value="${o.value}" ${o.value === safeFont(item.font) ? 'selected' : ''}>${o.label}</option>`).join('');
-            const baseInput = theme === 'modal'
-              ? 'bg-slate-50 hover:bg-white border-slate-200 focus:ring-blue-500/20 focus:border-blue-500'
-              : 'bg-white border-slate-200 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a]';
-            const baseSelect = theme === 'modal'
-              ? 'bg-slate-50 hover:bg-white border-slate-200 focus:ring-blue-500/20 focus:border-blue-500'
-              : 'bg-white border-slate-200 focus:ring-[#1e4a7a]/20 focus:border-[#1e4a7a]';
-            const card = theme === 'modal' ? 'bg-white' : 'bg-slate-50';
-
+            const font = safeFont(item.font);
+            const size = safeSize(item.size);
+            const color = safeColor(item.color);
+            const bold = !!item.bold;
+            
             return `
-              <div class="rounded-2xl border border-slate-200 ${card} p-4 subheading-item">
-                <input type="text" class="subheading-item-text w-full px-4 py-2.5 ${baseInput} border rounded-xl outline-none text-sm text-slate-800 placeholder-slate-400" placeholder="Enter subheading" value="${escapeAttr(item.text || '')}">
-                <div class="mt-3 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
-                  <div class="sm:col-span-5">
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Font</label>
-                    <select class="subheading-item-font w-full h-[42px] px-3 ${baseSelect} border rounded-xl outline-none text-sm text-slate-800">${opts}</select>
+              <div class="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5 subheading-item transition-all hover:border-slate-300 dark:hover:border-slate-600 shadow-sm">
+                <div class="flex items-center gap-3 mb-4">
+                  <div class="flex-1">
+                    <input type="text" class="subheading-item-text w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl outline-none text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 font-bold transition-all focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500" 
+                           placeholder="Enter subheading text..." value="${escapeAttr(item.text || '')}">
                   </div>
-                  <div class="sm:col-span-2">
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Size</label>
-                    <input type="number" min="10" max="80" class="subheading-item-size w-full h-[42px] px-3 ${baseSelect} border rounded-xl outline-none text-sm text-slate-800" value="${safeSize(item.size)}">
+                  <button type="button" class="subheading-item-remove w-11 h-11 shrink-0 inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-400 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-900/20 disabled:opacity-30 disabled:cursor-not-allowed transition-all" aria-label="Remove subheading" title="Remove">
+                    <i class="fas fa-trash-alt text-sm"></i>
+                  </button>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-4">
+                  <!-- Font Style Toggle -->
+                  <div class="flex items-center p-1 bg-slate-100 dark:bg-slate-900 rounded-xl">
+                    <button type="button" data-font="system_sans" class="font-toggle-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${font === 'system_sans' ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}">Sans</button>
+                    <button type="button" data-font="system_serif" class="font-toggle-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${font === 'system_serif' ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}">Serif</button>
+                    <button type="button" data-font="system_mono" class="font-toggle-btn px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${font === 'system_mono' ? 'bg-white dark:bg-slate-800 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}">Mono</button>
+                    <input type="hidden" class="subheading-item-font" value="${font}">
                   </div>
-                  <div class="sm:col-span-2">
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Color</label>
-                    <input type="color" class="subheading-item-color w-full h-[42px] px-2 py-2 ${baseSelect} border rounded-xl" value="${safeColor(item.color)}">
+
+                  <!-- Size Controls -->
+                  <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-900 rounded-xl">
+                    <button type="button" class="size-decrement text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"><i class="fas fa-minus-circle"></i></button>
+                    <span class="text-xs font-bold text-slate-700 dark:text-slate-200 min-w-[24px] text-center">${size}px</span>
+                    <button type="button" class="size-increment text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"><i class="fas fa-plus-circle"></i></button>
+                    <input type="hidden" class="subheading-item-size" value="${size}">
                   </div>
-                  <div class="sm:col-span-3">
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 opacity-0 select-none">Actions</label>
-                    <div class="flex items-center justify-end gap-2">
-                      <label class="h-[42px] inline-flex items-center gap-2 px-3 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700">
-                        <input type="checkbox" class="subheading-item-bold w-4 h-4 rounded border-slate-300 text-[#1e4a7a] focus:ring-[#1e4a7a]/30" ${item.bold ? 'checked' : ''}>
-                        Bold
-                      </label>
-                      ${theme === 'modal'
-                        ? '<button type="button" class="subheading-item-remove w-[42px] h-[42px] inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50" aria-label="Remove subheading" title="Remove"><i class="fas fa-trash-alt"></i></button>'
-                        : '<button type="button" class="subheading-item-remove h-[42px] px-3 rounded-xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">Remove</button>'
-                      }
+
+                  <!-- Bold Toggle -->
+                  <button type="button" class="bold-toggle-btn w-10 h-10 inline-flex items-center justify-center rounded-xl border-2 transition-all ${bold ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-slate-400 hover:border-slate-200 dark:hover:border-slate-600'}">
+                    <i class="fas fa-bold"></i>
+                    <input type="checkbox" class="subheading-item-bold hidden" ${bold ? 'checked' : ''}>
+                  </button>
+
+                  <!-- Color Picker -->
+                  <div class="relative flex items-center gap-2 pl-4 border-l border-slate-200 dark:border-slate-700">
+                    <div class="w-6 h-6 rounded-full border border-slate-200 dark:border-slate-700 overflow-hidden shadow-inner">
+                      <input type="color" class="subheading-item-color absolute inset-0 w-full h-full cursor-pointer opacity-0" value="${color}">
+                      <div class="color-preview w-full h-full" style="background-color: ${color}"></div>
                     </div>
+                    <span class="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest color-hex">${color}</span>
                   </div>
                 </div>
               </div>
@@ -1451,7 +1563,99 @@ function webinar_subheading_font_stack($key) {
               sync(addContainer, document.getElementById('addSubheadingHidden'), document.getElementById('addSubheadingItemsJson'));
             }
 
+            const addScheduleTz = document.getElementById('addScheduleTz');
+            const editScheduleTz = document.getElementById('editScheduleTz');
+            try {
+                const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local Time';
+                const now = new Date();
+                const offsetMin = -now.getTimezoneOffset();
+                const sign = offsetMin >= 0 ? '+' : '-';
+                const abs = Math.abs(offsetMin);
+                const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+                const mm = String(abs % 60).padStart(2, '0');
+                const tzText = `${tz} (UTC${sign}${hh}:${mm})`;
+                if (addScheduleTz) addScheduleTz.textContent = tzText;
+                if (editScheduleTz) editScheduleTz.textContent = tzText;
+            } catch (e) {
+                if (addScheduleTz) addScheduleTz.textContent = 'Local Time';
+                if (editScheduleTz) editScheduleTz.textContent = 'Local Time';
+            }
+
+            // File Upload Previews for Add Webinar
+            const addHostPic = document.getElementById('addHostPic');
+            const addHostPicPreview = document.getElementById('addHostPicPreview');
+            const addHostPicImg = document.getElementById('addHostPicImg');
+            const addHostPicName = document.getElementById('addHostPicName');
+            const addHostPicRemove = document.getElementById('addHostPicRemove');
+
+            if (addHostPic) {
+                addHostPic.addEventListener('change', function() {
+                    const file = this.files[0];
+                    if (file) {
+                        const reader = new FileReader();
+                        reader.onload = function(e) {
+                            addHostPicImg.src = e.target.result;
+                            addHostPicName.textContent = file.name;
+                            addHostPicPreview.classList.remove('hidden');
+                        }
+                        reader.readAsDataURL(file);
+                    }
+                });
+            }
+
+            if (addHostPicRemove) {
+                addHostPicRemove.addEventListener('click', function() {
+                    addHostPic.value = '';
+                    addHostPicPreview.classList.add('hidden');
+                });
+            }
+
+            const editHostPic = document.querySelector('#editWebinarForm input[type="file"][name="host_pic"]');
+            const editHostPicContainer = document.getElementById('currentHostPic');
+            const editHostPicImg = document.getElementById('hostPicPreview');
+            const editHostPicLink = document.getElementById('hostPicLink');
+
+            if (editHostPic) {
+                editHostPic.addEventListener('change', function() {
+                    const file = this.files && this.files[0] ? this.files[0] : null;
+                    if (!file || !editHostPicContainer || !editHostPicImg) return;
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const src = (e && e.target) ? e.target.result : '';
+                        if (typeof src === 'string' && src !== '') {
+                            editHostPicImg.src = src;
+                            if (editHostPicLink) editHostPicLink.href = src;
+                            editHostPicContainer.classList.remove('hidden');
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+
+            const addWebinarVid = document.getElementById('addWebinarVid');
+            const addWebinarVidPreview = document.getElementById('addWebinarVidPreview');
+            const addWebinarVidName = document.getElementById('addWebinarVidName');
+            const addWebinarVidRemove = document.getElementById('addWebinarVidRemove');
+
+            if (addWebinarVid) {
+                addWebinarVid.addEventListener('change', function() {
+                    const file = this.files[0];
+                    if (file) {
+                        addWebinarVidName.textContent = file.name;
+                        addWebinarVidPreview.classList.remove('hidden');
+                    }
+                });
+            }
+
+            if (addWebinarVidRemove) {
+                addWebinarVidRemove.addEventListener('click', function() {
+                    addWebinarVid.value = '';
+                    addWebinarVidPreview.classList.add('hidden');
+                });
+            }
+
             document.addEventListener('click', (e) => {
+              // Add subheading
               const addBtn = e.target.closest('[data-sub-item-add]');
               if (addBtn) {
                 const section = getSectionFromTarget(addBtn);
@@ -1461,6 +1665,8 @@ function webinar_subheading_font_stack($key) {
                 }
                 return;
               }
+
+              // Remove subheading
               const rmBtn = e.target.closest('.subheading-item-remove');
               if (rmBtn) {
                 const section = getSectionFromTarget(rmBtn);
@@ -1471,10 +1677,78 @@ function webinar_subheading_font_stack($key) {
                     sync(section.container, section.hiddenText, section.hiddenJson);
                   }
                 }
+                return;
+              }
+
+              // Font toggle
+              const fontBtn = e.target.closest('.font-toggle-btn');
+              if (fontBtn) {
+                  const val = fontBtn.dataset.font;
+                  const container = fontBtn.closest('.flex');
+                  const hidden = container.querySelector('.subheading-item-font');
+                  if (hidden) {
+                      hidden.value = val;
+                      container.querySelectorAll('.font-toggle-btn').forEach(b => {
+                          const isActive = b.dataset.font === val;
+                          b.classList.toggle('bg-white', isActive);
+                          b.classList.toggle('dark:bg-slate-800', isActive);
+                          b.classList.toggle('text-blue-600', isActive);
+                          b.classList.toggle('dark:text-blue-400', isActive);
+                          b.classList.toggle('shadow-sm', isActive);
+                          b.classList.toggle('text-slate-500', !isActive);
+                          b.classList.toggle('dark:text-slate-300', !isActive);
+                      });
+                      syncForm(fontBtn.closest('form'));
+                  }
+                  return;
+              }
+
+              // Size controls
+              const sizeInc = e.target.closest('.size-increment');
+              const sizeDec = e.target.closest('.size-decrement');
+              if (sizeInc || sizeDec) {
+                  const item = (sizeInc || sizeDec).closest('.flex');
+                  const hidden = item.querySelector('.subheading-item-size');
+                  const display = item.querySelector('span');
+                  let val = parseInt(hidden.value, 10);
+                  if (sizeInc) val = Math.min(80, val + 2);
+                  else val = Math.max(10, val - 2);
+                  hidden.value = val;
+                  display.textContent = val + 'px';
+                  syncForm((sizeInc || sizeDec).closest('form'));
+                  return;
+              }
+
+              // Bold toggle
+              const boldBtn = e.target.closest('.bold-toggle-btn');
+              if (boldBtn) {
+                  const checkbox = boldBtn.querySelector('input');
+                  checkbox.checked = !checkbox.checked;
+                  boldBtn.classList.toggle('bg-blue-600', checkbox.checked);
+                  boldBtn.classList.toggle('border-blue-600', checkbox.checked);
+                  boldBtn.classList.toggle('text-white', checkbox.checked);
+                  boldBtn.classList.toggle('bg-white', !checkbox.checked);
+                  boldBtn.classList.toggle('dark:bg-slate-800', !checkbox.checked);
+                  boldBtn.classList.toggle('border-slate-100', !checkbox.checked);
+                  boldBtn.classList.toggle('dark:border-slate-700', !checkbox.checked);
+                  boldBtn.classList.toggle('text-slate-400', !checkbox.checked);
+                  boldBtn.classList.toggle('dark:hover:border-slate-600', !checkbox.checked);
+                  syncForm(boldBtn.closest('form'));
+                  return;
               }
             });
 
             document.addEventListener('input', (e) => {
+              const colorPicker = e.target.closest('.subheading-item-color');
+              if (colorPicker) {
+                  const container = colorPicker.closest('.relative');
+                  const preview = container.querySelector('.color-preview');
+                  const hex = container.querySelector('.color-hex');
+                  preview.style.backgroundColor = colorPicker.value;
+                  hex.textContent = colorPicker.value.toUpperCase();
+                  // No return, fall through to sync
+              }
+
               const section = getSectionFromTarget(e.target);
               if (section && section.container) {
                 sync(section.container, section.hiddenText, section.hiddenJson);

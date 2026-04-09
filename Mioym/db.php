@@ -1,13 +1,32 @@
 <?php
 $host = 'localhost';
 $dbname = 'webinar_db';
-$username = 'root'; // Default XAMPP username
-$password = '';     // Default XAMPP password
+$username = 'root';
+$password = '';
+// $username = 'mioymadmin'; // Default XAMPP username
+// $password = 'Mioym$1234!!!';     // Default XAMPP password
 
 try {
     $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
     // Set the PDO error mode to exception
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    
+    // In production, sessions can fail if the domain/SSL isn't properly handled.
+    // We ensure sessions work by setting proper cookie params.
+    if (session_status() === PHP_SESSION_NONE) {
+        $cookieParams = session_get_cookie_params();
+        // Use SERVER_NAME to avoid port issues in domain field
+        $domain = $_SERVER['SERVER_NAME'] ?? $cookieParams['domain'];
+        session_set_cookie_params([
+            'lifetime' => 0,
+            'path' => $cookieParams['path'],
+            'domain' => $domain,
+            'secure' => isset($_SERVER['HTTPS']), // Only send over HTTPS if applicable
+            'httponly' => true, // Prevent JavaScript access to session cookie
+            'samesite' => 'Lax' // Protect against CSRF
+        ]);
+        session_start(); // Initialize the session
+    }
 
     // Auto-create is_published column if it doesn't exist
     try {
@@ -19,9 +38,27 @@ try {
     // Auto-create is_accredited column for registrants
     try {
         $pdo->exec("ALTER TABLE registrants_tbl ADD COLUMN is_accredited TINYINT(1) DEFAULT 0");
-    } catch(PDOException $e) {
-        // Column likely already exists, ignore error
-    }
+    } catch(PDOException $e) { }
+
+    // Auto-create webinar_id column for registrants if it doesn't exist
+    try {
+        $pdo->exec("ALTER TABLE registrants_tbl ADD COLUMN webinar_id VARCHAR(50) NULL");
+    } catch(PDOException $e) { }
+
+    // Auto-create duration column for webinar_tbl if it doesn't exist
+    try {
+        $pdo->exec("ALTER TABLE webinar_tbl ADD COLUMN duration VARCHAR(50) NULL DEFAULT '60-minute'");
+    } catch(PDOException $e) { }
+
+    // Auto-create phone column for registrants
+    try {
+        $pdo->exec("ALTER TABLE registrants_tbl ADD COLUMN phone VARCHAR(25) NULL");
+    } catch(PDOException $e) { }
+
+    // Auto-create country_code column for registrants
+    try {
+        $pdo->exec("ALTER TABLE registrants_tbl ADD COLUMN country_code VARCHAR(10) NULL");
+    } catch(PDOException $e) { }
 
     // Auto-create is_visible column for feedback
     try {
@@ -107,6 +144,7 @@ try {
         // Cleanup: Remove SMTP settings from DB if they were added
         $pdo->exec("DELETE FROM settings_tbl WHERE setting_key LIKE 'smtp_%'");
     } catch(PDOException $e) {
+        // Table likely already exists, ignore error
     }
 
 } catch(PDOException $e) {

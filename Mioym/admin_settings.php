@@ -1,5 +1,4 @@
 <?php
-session_start();
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config.php';
 
@@ -49,7 +48,8 @@ $settings = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Global Settings - Admin Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" type="image/png" href="img/logo.png">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="dynamic-island.js"></script>
     <style>
@@ -93,25 +93,25 @@ $settings = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         
                         <div class="p-6 space-y-6">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <?php foreach ($settings as $setting): ?>
+                                <?php 
+                                $allowedKeys = ['annual_return', 'support_email', 'office_address', 'office_phone'];
+                                foreach ($settings as $setting): 
+                                    if (!in_array($setting['setting_key'], $allowedKeys)) continue;
+                                ?>
                                 <div class="space-y-2">
                                     <label class="block text-sm font-semibold text-slate-700 capitalize">
-                                        <?php echo str_replace('_', ' ', $setting['setting_key']); ?>
+                                        <?php 
+                                        $label = str_replace('_', ' ', $setting['setting_key']);
+                                        if ($setting['setting_key'] === 'annual_return') $label = "Annual Return Rate";
+                                        echo $label;
+                                        ?>
                                     </label>
                                     <div class="relative group">
-                                        <?php if ($setting['setting_key'] === 'enable_email_notifications'): ?>
-                                            <select name="settings[<?php echo $setting['setting_key']; ?>]" 
-                                                    class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all text-slate-800 font-medium group-hover:bg-white">
-                                                <option value="1" <?php echo $setting['setting_value'] == '1' ? 'selected' : ''; ?>>Enabled</option>
-                                                <option value="0" <?php echo $setting['setting_value'] == '0' ? 'selected' : ''; ?>>Disabled</option>
-                                            </select>
-                                        <?php else: ?>
-                                            <input type="text" 
-                                                   name="settings[<?php echo $setting['setting_key']; ?>]" 
-                                                   value="<?php echo htmlspecialchars($setting['setting_value']); ?>"
-                                                   class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all text-slate-800 font-medium group-hover:bg-white"
-                                            >
-                                        <?php endif; ?>
+                                        <input type="text" 
+                                               name="settings[<?php echo $setting['setting_key']; ?>]" 
+                                               value="<?php echo htmlspecialchars($setting['setting_value']); ?>"
+                                               class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all text-slate-800 font-medium group-hover:bg-white"
+                                        >
                                     </div>
                                     <p class="text-[10px] text-slate-400 font-medium italic">
                                         Last updated: <?php echo date('M d, Y H:i', strtotime($setting['updated_at'])); ?>
@@ -135,36 +135,8 @@ $settings = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </div>
 
     <script>
-        // Theme Management
-        const body = document.body;
-        const themeToggleBtn = document.getElementById('themeToggleBtn');
-        const themeIcon = document.getElementById('themeIcon');
-        const themeText = document.getElementById('themeText');
-
-        function updateThemeUI(isDark) {
-            if (isDark) {
-                body.classList.add('dark-theme');
-                themeIcon.classList.replace('fa-moon', 'fa-sun');
-                themeText.textContent = 'Light Mode';
-            } else {
-                body.classList.remove('dark-theme');
-                themeIcon.classList.replace('fa-sun', 'fa-moon');
-                themeText.textContent = 'Dark Mode';
-            }
-        }
-
-        // Initialize theme
-        const savedTheme = localStorage.getItem('admin-theme') || 'light';
-        updateThemeUI(savedTheme === 'dark');
-
-        themeToggleBtn.addEventListener('click', () => {
-            const isDark = body.classList.toggle('dark-theme');
-            localStorage.setItem('admin-theme', isDark ? 'dark' : 'light');
-            updateThemeUI(isDark);
-        });
-
-        // Dynamic Island Alerts
-        window.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', function() {
+            // Dynamic Island Alerts
             if (window.DynamicIsland) {
                 <?php if ($success): ?>
                 DynamicIsland.success("<?php echo addslashes($success); ?>");

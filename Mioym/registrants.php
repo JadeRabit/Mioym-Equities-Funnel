@@ -1,5 +1,4 @@
 <?php
-session_start();
 require_once 'db.php';
 require_once 'config.php';
 
@@ -78,7 +77,7 @@ if ($status_filter === 'sent') {
 $where_sql = count($where_clauses) > 0 ? "WHERE " . implode(" AND ", $where_clauses) : "";
 
 // Pagination Logic
-$limit = 5;
+$limit = 10;
 $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
 $offset = ($page - 1) * $limit;
 
@@ -107,7 +106,8 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Registrants · Mioym Equities</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" type="image/png" href="img/logo.png">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="dynamic-island.js"></script>
@@ -159,7 +159,7 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
                 <form method="GET" action="registrants.php" class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-wrap items-center gap-4">
                     <div class="relative flex-1 min-w-[300px]">
                         <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-                        <input type="text" name="search" id="table-search" placeholder="Search by name, email or phone..." 
+                        <input type="text" name="search" id="table-search" placeholder="Search by name, email or phone..."
                                value="<?php echo htmlspecialchars($search); ?>"
                                class="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition">
                     </div>
@@ -197,6 +197,7 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
                                 </th>
                                 <th class="p-4">Registrant Name</th>
                                 <th class="p-4">Contact Info</th>
+                                <th class="p-4">Mobile number</th>
                                 <th class="p-4">Webinar Category</th>
                                 <th class="p-4">Reg. Date</th>
                                 <th class="p-4 text-center">Status</th>
@@ -224,23 +225,36 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
                                 
                                 <td class="p-4">
                                     <div class="flex items-center gap-3">
-                                        <div class="flex flex-col">
-                                            <span class="text-slate-600 text-xs font-medium"><?php echo htmlspecialchars($r['email']); ?></span>
-                                            <?php if($r['phone']): ?>
-                                                <span class="text-slate-400 text-[11px]"><?php echo htmlspecialchars($r['phone']); ?></span>
-                                            <?php endif; ?>
-                                        </div>
+                                        <span class="text-slate-600 text-xs font-medium"><?php echo htmlspecialchars($r['email']); ?></span>
                                         <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                             <a href="mailto:<?php echo $r['email']; ?>" class="w-7 h-7 flex items-center justify-center bg-blue-50 text-blue-500 rounded-lg hover:bg-blue-100 transition" title="Email Registrant">
                                                 <i class="far fa-envelope text-xs"></i>
                                             </a>
-                                            <?php if($r['phone']): ?>
+                                        </div>
+                                    </div>
+                                </td>
+                                
+                                <td class="p-4">
+                                    <?php if($r['phone']): ?>
+                                        <div class="flex items-center gap-3">
+                                            <div class="flex items-center gap-2">
+                                                <?php if(!empty($r['country_code'])): ?>
+                                                    <img src="https://flagcdn.com/w20/<?php echo strtolower($r['country_code']); ?>.png" 
+                                                         alt="<?php echo strtoupper($r['country_code']); ?>" 
+                                                         class="w-5 h-auto rounded-sm shadow-sm"
+                                                         title="<?php echo strtoupper($r['country_code']); ?>">
+                                                <?php endif; ?>
+                                                <span class="text-slate-600 text-xs font-medium"><?php echo htmlspecialchars($r['phone']); ?></span>
+                                            </div>
+                                            <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <a href="tel:<?php echo $r['phone']; ?>" class="w-7 h-7 flex items-center justify-center bg-emerald-50 text-emerald-500 rounded-lg hover:bg-emerald-100 transition" title="Call Registrant">
                                                     <i class="fas fa-phone-alt text-xs"></i>
                                                 </a>
-                                            <?php endif; ?>
+                                            </div>
                                         </div>
-                                    </div>
+                                    <?php else: ?>
+                                        <span class="text-slate-300 italic text-xs">Not provided</span>
+                                    <?php endif; ?>
                                 </td>
                                 
                                 <td class="p-4">

@@ -1,5 +1,4 @@
 <?php
-session_start();
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config.php';
 
@@ -11,12 +10,29 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
 $success = $_GET['success'] ?? '';
 
+try {
+    $pdo->exec("DELETE FROM admin_notifications WHERE type = 'registrants' AND created_at < (NOW() - INTERVAL 3 HOUR)");
+} catch (Throwable $e) { }
+
 // Handle Actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     if ($action === 'mark_all_read') {
         $pdo->exec("UPDATE admin_notifications SET is_read = 1 WHERE type = 'registrants'");
         header('Location: admin_notifications_list.php?success=All marked as read');
+        exit;
+    } elseif ($action === 'delete_selected') {
+        $ids = $_POST['ids'] ?? [];
+        if (!is_array($ids)) $ids = [];
+        $ids = array_values(array_filter(array_map('intval', $ids), fn($v) => $v > 0));
+        if (!$ids) {
+            header('Location: admin_notifications_list.php?success=No notifications selected');
+            exit;
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $pdo->prepare("DELETE FROM admin_notifications WHERE type = 'registrants' AND id IN ($placeholders)");
+        $stmt->execute($ids);
+        header('Location: admin_notifications_list.php?success=Selected notifications deleted');
         exit;
     } elseif ($action === 'delete' && isset($_POST['id'])) {
         $stmt = $pdo->prepare("DELETE FROM admin_notifications WHERE id = ?");
@@ -107,7 +123,8 @@ function time_elapsed_string($datetime, $full = false) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Notifications · Mioym Admin</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" type="image/png" href="img/logo.png">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <script src="dynamic-island.js"></script>
     <style>
@@ -130,7 +147,7 @@ function time_elapsed_string($datetime, $full = false) {
             
             <!-- Refined Header & Filter Bar -->
             <div class="bg-white border-b border-slate-100 px-6 py-6 md:px-10">
-                <div class="max-w-5xl mx-auto">
+                <div class="w-full max-w-[1600px] mx-auto">
                     <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
                         <div>
                             <h1 class="text-2xl font-black text-slate-900 tracking-tight flex items-center gap-3">
@@ -151,6 +168,18 @@ function time_elapsed_string($datetime, $full = false) {
                                 <input type="hidden" name="action" value="mark_all_read">
                                 <button type="submit" class="text-[11px] font-black uppercase tracking-widest text-slate-400 hover:text-blue-600 transition-colors flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-blue-50">
                                     <i class="fas fa-check-double"></i> Mark all read
+                                </button>
+                            </form>
+
+                            <div class="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100">
+                                <input id="selectAllNotifications" type="checkbox" class="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                                <label for="selectAllNotifications" class="text-[11px] font-black uppercase tracking-widest text-slate-400 cursor-pointer">Select all</label>
+                            </div>
+
+                            <form id="bulkDeleteForm" method="POST" class="inline" onsubmit="return confirm('Delete selected notifications?');">
+                                <input type="hidden" name="action" value="delete_selected">
+                                <button id="bulkDeleteBtn" type="submit" disabled class="text-[11px] font-black uppercase tracking-widest text-slate-300 transition-colors flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 disabled:opacity-60 disabled:cursor-not-allowed hover:bg-rose-50 hover:text-rose-600">
+                                    <i class="far fa-trash-alt"></i> Delete selected
                                 </button>
                             </form>
                         </div>
@@ -180,7 +209,7 @@ function time_elapsed_string($datetime, $full = false) {
 
             <!-- Notification Stream -->
             <div class="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-10">
-                <div class="max-w-4xl mx-auto">
+                <div class="w-full max-w-[1600px] mx-auto">
                     <div class="space-y-2">
                         <?php if (empty($notifications)): ?>
                         <div class="py-20 text-center">
@@ -200,6 +229,7 @@ function time_elapsed_string($datetime, $full = false) {
                             ?>
                             <div class="notification-row group relative bg-white border border-slate-100 rounded-2xl p-4 transition-all duration-300 hover:shadow-lg hover:shadow-slate-200/50 hover:-translate-y-0.5 <?php echo !$n['is_read'] ? 'bg-blue-50/40 border-blue-100/50' : ''; ?>">
                                 <div class="flex items-center gap-4">
+                                    <input type="checkbox" class="notif-checkbox w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" form="bulkDeleteForm" name="ids[]" value="<?php echo (int)$n['id']; ?>">
                                     <!-- Status Dot -->
                                     <div class="w-2 h-2 rounded-full <?php echo !$n['is_read'] ? 'bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.5)]' : 'bg-transparent'; ?> shrink-0"></div>
                                     
@@ -274,16 +304,30 @@ function time_elapsed_string($datetime, $full = false) {
     </div>
 
     <script>
-        // Theme sync
-        const body = document.body;
-        const savedTheme = localStorage.getItem('admin-theme') || 'light';
-        if (savedTheme === 'dark') body.classList.add('dark-theme');
-
         // Dynamic Island Success
         window.addEventListener('DOMContentLoaded', () => {
             if (window.DynamicIsland && "<?php echo $success; ?>") {
                 DynamicIsland.success("<?php echo addslashes($success); ?>");
             }
+
+            const selectAll = document.getElementById('selectAllNotifications');
+            const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+            const checkboxes = Array.from(document.querySelectorAll('.notif-checkbox'));
+
+            function updateBulkState() {
+                const selectedCount = checkboxes.filter(cb => cb.checked).length;
+                if (bulkDeleteBtn) bulkDeleteBtn.disabled = selectedCount === 0;
+                if (selectAll) selectAll.checked = selectedCount > 0 && selectedCount === checkboxes.length;
+            }
+
+            selectAll?.addEventListener('change', () => {
+                const checked = !!selectAll.checked;
+                checkboxes.forEach(cb => { cb.checked = checked; });
+                updateBulkState();
+            });
+
+            checkboxes.forEach(cb => cb.addEventListener('change', updateBulkState));
+            updateBulkState();
         });
     </script>
 </body>

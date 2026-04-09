@@ -25,7 +25,9 @@ if (!$latestWebinar) {
 // Set default values if no webinar is found at all
 $hostName = $latestWebinar['hostname'] ?? 'Elena Marchetti';
 $webinarTitle = $latestWebinar['title'] ?? 'Exclusive Webinar';
+$webinarDuration = $latestWebinar['duration'] ?? get_setting('webinar_duration', '60-minute');
 $meetingLink = $latestWebinar['webinar_link'] ?? '#';
+$webinarVid = $latestWebinar['webinar_vid'] ?? null;
 
 // Dynamic schedule formatting
 $scheduleDateStr = 'Date to be announced';
@@ -48,8 +50,9 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Thank You · Mioym Equities Webinar</title>
+    <link rel="icon" type="image/png" href="img/logo.png">
     <!-- Tailwind + Font Awesome -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -88,11 +91,11 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
             <div class="absolute top-0 right-0 w-32 h-32 sm:w-40 sm:h-40 bg-green-50 rounded-bl-full -z-5"></div>
             
             <div class="text-center mb-8 sm:mb-10">
-                <div class="bg-green-100 w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center text-green-600 text-4xl sm:text-5xl mx-auto mb-6 shadow-lg border-4 border-white">
+                <div class="bg-green-100 text-green-600 w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center text-4xl sm:text-5xl mx-auto mb-6 shadow-lg border-4 border-white">
                     <i class="fas fa-check-circle"></i>
                 </div>
                 <h1 class="text-3xl sm:text-4xl md:text-5xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">
-                    Thank You, <span class="text-[#1e4a7a]"><?php echo $name; ?></span>! 
+                    Thank You, <span class="text-[#1e4a7a]"><?php echo $name; ?></span>!
                 </h1>
                 <p class="text-lg sm:text-xl text-slate-600 font-medium">You're successfully registered.</p>
             </div>
@@ -107,6 +110,25 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
                         <h3 class="font-bold text-slate-900 text-lg">Email sent!</h3>
                         <p class="text-sm sm:text-base text-slate-600 leading-relaxed">Check your inbox for the access link and calendar invite.</p>
                     </div>
+                </div>
+            </div>
+
+            <!-- Webinar Video -->
+            <div class="mb-8 sm:mb-10">
+                <div class="bg-slate-50/80 rounded-2xl border border-slate-100 overflow-hidden shadow-sm">
+                    <?php if (!empty($webinarVid)): ?>
+                        <div class="aspect-video bg-black">
+                            <video class="w-full h-full" controls controlsList="nodownload" autoplay muted playsinline>
+                                <source src="<?php echo htmlspecialchars($webinarVid); ?>" type="video/mp4">
+                                Your browser does not support the video tag.
+                            </video>
+                        </div>
+                    <?php else: ?>
+                        <div class="aspect-video flex items-center justify-center text-slate-400 gap-3">
+                            <i class="fas fa-video-slash text-xl"></i>
+                            <span class="font-semibold">Video coming soon</span>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -139,7 +161,7 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
                             </div>
                             <div>
                                 <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Duration</p>
-                                <p class="font-bold text-slate-900"><?php echo htmlspecialchars(get_setting('webinar_duration', '60-minute')); ?></p>
+                                <p class="font-bold text-slate-900"><?php echo htmlspecialchars($webinarDuration); ?></p>
                                 <p class="text-sm text-slate-600 font-medium">+ 15 min Q&A</p>
                             </div>
                         </div>
@@ -222,10 +244,11 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
             <div class="mt-12 pt-8 border-t border-slate-100 text-center">
                 <p class="text-sm font-bold text-slate-400 uppercase tracking-widest mb-6">Share with your network</p>
                 <div class="flex justify-center gap-5">
-                    <a href="#" class="w-12 h-12 bg-[#1877f2]/10 text-[#1877f2] rounded-2xl flex items-center justify-center hover:bg-[#1877f2] hover:text-white hover:scale-110 transition-all duration-300 shadow-sm"><i class="fab fa-facebook-f text-lg"></i></a>
-                    <a href="#" class="w-12 h-12 bg-[#1da1f2]/10 text-[#1da1f2] rounded-2xl flex items-center justify-center hover:bg-[#1da1f2] hover:text-white hover:scale-110 transition-all duration-300 shadow-sm"><i class="fab fa-twitter text-lg"></i></a>
-                    <a href="#" class="w-12 h-12 bg-[#0a66c2]/10 text-[#0a66c2] rounded-2xl flex items-center justify-center hover:bg-[#0a66c2] hover:text-white hover:scale-110 transition-all duration-300 shadow-sm"><i class="fab fa-linkedin-in text-lg"></i></a>
-                    <a href="#" class="w-12 h-12 bg-[#25D366]/10 text-[#25D366] rounded-2xl flex items-center justify-center hover:bg-[#25D366] hover:text-white hover:scale-110 transition-all duration-300 shadow-sm"><i class="fab fa-whatsapp text-lg"></i></a>
+                    <a href="https://www.facebook.com/mioymrenttoown/" target="_blank" class="w-12 h-12 bg-[#1877f2]/10 text-[#1877f2] rounded-2xl flex items-center justify-center hover:bg-[#1877f2] hover:text-white hover:scale-110 transition-all duration-300 shadow-sm" aria-label="Facebook"><i class="fab fa-facebook-f text-lg"></i></a>
+                    <a href="https://mysig.io/bwjx9dVn" target="_blank" class="w-12 h-12 bg-[#E1306C]/10 text-[#E1306C] rounded-2xl flex items-center justify-center hover:bg-[#E1306C] hover:text-white hover:scale-110 transition-all duration-300 shadow-sm" aria-label="Instagram"><i class="fab fa-instagram text-lg"></i></a>
+                    <a href="https://x.com/mioymAF2900" target="_blank" class="w-12 h-12 bg-[#1da1f2]/10 text-[#1da1f2] rounded-2xl flex items-center justify-center hover:bg-[#1da1f2] hover:text-white hover:scale-110 transition-all duration-300 shadow-sm" aria-label="Twitter"><i class="fab fa-twitter text-lg"></i></a>
+                    <a href="https://www.tiktok.com/@mioym.rent2own" target="_blank" class="w-12 h-12 bg-[#000000]/10 text-[#000000] rounded-2xl flex items-center justify-center hover:bg-[#000000] hover:text-white hover:scale-110 transition-all duration-300 shadow-sm" aria-label="TikTok"><i class="fab fa-tiktok text-lg"></i></a>
+                    <a href="https://www.linkedin.com/company/mioym-group/" target="_blank" class="w-12 h-12 bg-[#0a66c2]/10 text-[#0a66c2] rounded-2xl flex items-center justify-center hover:bg-[#0a66c2] hover:text-white hover:scale-110 transition-all duration-300 shadow-sm" aria-label="LinkedIn"><i class="fab fa-linkedin-in text-lg"></i></a>
                 </div>
             </div>
         </div>

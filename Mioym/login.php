@@ -1,6 +1,6 @@
 <?php
-session_start();
 require_once 'db.php';
+require_once 'config.php';
 
 function validate_csrf_post() {
     if (!isset($_SESSION['csrf']['value']) || !isset($_SESSION['csrf']['expires'])) return false;
@@ -22,20 +22,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: ' . $dest);
         exit;
     }
+
+    $recaptcha_secret_key = get_setting('recaptcha_secret_key', '') ?: (getenv('RECAPTCHA_SECRET_KEY') ?: '');
+    $recaptcha_response = trim((string)($_POST['g-recaptcha-response'] ?? ''));
+    if ($recaptcha_secret_key === '' || $recaptcha_response === '') {
+        $_SESSION['di'] = ['type' => 'warn', 'title' => 'Captcha', 'message' => 'Please complete the captcha.'];
+        $dest = !empty($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'index.php';
+        header('Location: ' . $dest);
+        exit;
+    }
+    $captcha_ok = false;
+    try {
+        $payload = http_build_query([
+            'secret' => $recaptcha_secret_key,
+            'response' => $recaptcha_response,
+            'remoteip' => $_SERVER['REMOTE_ADDR'] ?? ''
+        ]);
+        $resp = '';
+        if (function_exists('curl_init')) {
+            $ch = curl_init('https://www.google.com/recaptcha/api/siteverify');
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+            curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+            $resp = (string)curl_exec($ch);
+            curl_close($ch);
+        } else {
+            $ctx = stream_context_create([
+                'http' => [
+                    'method' => 'POST',
+                    'header' => "Content-type: application/x-www-form-urlencoded\r\n",
+                    'content' => $payload,
+                    'timeout' => 8
+                ]
+            ]);
+            $resp = (string)@file_get_contents('https://www.google.com/recaptcha/api/siteverify', false, $ctx);
+        }
+        $data = json_decode((string)$resp, true);
+        $captcha_ok = is_array($data) && !empty($data['success']);
+    } catch (Throwable $e) {
+        $captcha_ok = false;
+    }
+    if (!$captcha_ok) {
+        $_SESSION['di'] = ['type' => 'warn', 'title' => 'Captcha', 'message' => 'Captcha verification failed. Please try again.'];
+        $dest = !empty($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'index.php';
+        header('Location: ' . $dest);
+        exit;
+    }
+
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
     $stmt = $pdo->prepare("SELECT * FROM admin_tbl WHERE username = ? LIMIT 1");
     $stmt->execute([$username]);
     $admin = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($admin && (password_verify($password, $admin['password']) || $password === $admin['password'])) {
+
+    // Verify password using only secure hashes
+    if ($admin && password_verify($password, $admin['password'])) {
         session_regenerate_id(true);
         $_SESSION['admin_logged_in'] = true;
         $_SESSION['admin_username'] = $admin['username'];
-        if ($password === $admin['password']) {
-            $hashed = password_hash($password, PASSWORD_DEFAULT);
-            $updateStmt = $pdo->prepare("UPDATE admin_tbl SET password = ? WHERE username = ?");
-            $updateStmt->execute([$hashed, $username]);
-        }
 
         $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
         if (is_string($ip) && strpos($ip, ',') !== false) {
@@ -83,7 +129,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $_SESSION['di'] = ['type' => 'warn', 'title' => 'Login Failed', 'message' => 'Invalid credentials. Please check your username and password.'];
         $dest = !empty($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'index.php';
-        header('Location: ' . $dest);
+        $connector = (strpos($dest, '?') !== false) ? '&' : '?';
+        header('Location: ' . $dest . $connector . 'login_error=1');
         exit;
     }
 } else {
