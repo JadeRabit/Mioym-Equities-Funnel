@@ -7,6 +7,20 @@ if (!isset($_SESSION['admin_logged_in'])) {
     exit;
 }
 
+// CSRF Protection
+if (!isset($_SESSION['csrf']) || !isset($_SESSION['csrf']['value']) || time() >= (int)($_SESSION['csrf']['expires'] ?? 0)) {
+    $_SESSION['csrf'] = [
+        'value' => bin2hex(random_bytes(32)),
+        'expires' => time() + 900
+    ];
+}
+
+function validate_csrf_webinars($token) {
+    if (!isset($_SESSION['csrf']['value']) || !isset($_SESSION['csrf']['expires'])) return false;
+    if (time() >= (int)$_SESSION['csrf']['expires']) return false;
+    return hash_equals($_SESSION['csrf']['value'], (string)$token);
+}
+
 $hasDescription = true;
 try {
     $pdo->query("SELECT description FROM webinar_tbl LIMIT 1");
@@ -105,13 +119,40 @@ if (!$hasSubheadingItemsJson) {
 
 // Handle CRUD & Actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
-    $action = $_POST['action'];
+    $csrf = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_webinars($csrf)) {
+        $_SESSION['di'] = ['type' => 'error', 'title' => 'Security', 'message' => 'Security check failed. Please try again.'];
+        header('Location: webinars.php');
+        exit;
+    }
     
-    // File upload helper function
-    function handleUpload($fileInputName, $uploadDir = 'uploads/') {
+    $action = $_POST['action'];
+    $uploadError = '';
+    
+    // File upload helper function with validation
+    function handleUpload($fileInputName, $uploadDir = 'uploads/', $allowedTypes = []) {
+        global $uploadError;
+        
+        if (!isset($_FILES[$fileInputName]) || $_FILES[$fileInputName]['error'] === UPLOAD_ERR_NO_FILE) {
+            return null;
+        }
+        
         if (!is_dir($uploadDir)) {
             mkdir($uploadDir, 0777, true);
         }
+        
+        if ($_FILES[$fileInputName]['error'] !== UPLOAD_ERR_OK) {
+            $uploadError = "Upload error code: " . $_FILES[$fileInputName]['error'];
+            return null;
+        }
+        
+        $fileExt = strtolower(pathinfo($_FILES[$fileInputName]['name'], PATHINFO_EXTENSION));
+        
+        if (!empty($allowedTypes) && !in_array($fileExt, $allowedTypes)) {
+            $uploadError = "Invalid file type. Allowed: " . implode(', ', $allowedTypes);
+            return null;
+        }
+        
         if (isset($_FILES[$fileInputName]) && $_FILES[$fileInputName]['error'] === UPLOAD_ERR_OK) {
             $fileName = time() . '_' . basename($_FILES[$fileInputName]['name']);
             $targetPath = $uploadDir . $fileName;
@@ -150,13 +191,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $size = (int)($it['size'] ?? 20);
             if ($size < 10) $size = 10;
             if ($size > 80) $size = 80;
+            $spacing = (int)($it['spacing'] ?? 8);
+            if ($spacing < 0) $spacing = 0;
+            if ($spacing > 64) $spacing = 64;
             $color = trim((string)($it['color'] ?? '#ffffff'));
             if (!preg_match('/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/', $color)) $color = '#ffffff';
             if ($color !== '' && $color[0] !== '#') $color = '#' . $color;
             $bold = !empty($it['bold']) ? 1 : 0;
             $font = (string)($it['font'] ?? 'system_sans');
             if (!in_array($font, $allowedFonts, true)) $font = 'system_sans';
-            $cleanItems[] = ['text' => $text, 'size' => $size, 'color' => $color, 'bold' => $bold, 'font' => $font];
+            $cleanItems[] = ['text' => $text, 'size' => $size, 'spacing' => $spacing, 'color' => $color, 'bold' => $bold, 'font' => $font];
             if (count($cleanItems) >= 12) break;
         }
         if (!empty($cleanItems)) {
@@ -167,12 +211,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
         $finalSubheadingItemsJson = !empty($cleanItems) ? json_encode($cleanItems, JSON_UNESCAPED_UNICODE) : null;
         
-        $host_pic_path = handleUpload('host_pic');
-        $webinar_vid_path = handleUpload('webinar_vid');
+        $host_pic_path = handleUpload('host_pic', 'uploads/', ['jpg', 'jpeg', 'png']);
+        $webinar_vid_path = handleUpload('webinar_vid', 'uploads/', ['mp4']);
         $duration = trim($_POST['duration'] ?? '60-minute');
+        $timezone = trim($_POST['timezone'] ?? 'America/New_York');
         
-        $columns = ['title', 'hostname', 'host_pic', 'webinar_vid', 'webinar_id', 'webinar_link', '`schedule_date&time`', 'status', 'duration'];
-        $values = [$_POST['title'], $_POST['hostname'], $host_pic_path, $webinar_vid_path, $new_webinar_id, $_POST['meeting_link'], $_POST['schedule_date_time'], $status, $duration];
+        if (!empty($uploadError)) {
+            $_SESSION['di'] = ['type' => 'error', 'title' => 'Upload Error', 'message' => $uploadError];
+            header('Location: webinars.php');
+            exit;
+        }
+        
+        $columns = ['title', 'hostname', 'host_pic', 'webinar_vid', 'webinar_id', 'webinar_link', '`schedule_date&time`', 'status', 'duration', 'timezone'];
+        $values = [$_POST['title'], $_POST['hostname'], $host_pic_path, $webinar_vid_path, $new_webinar_id, $_POST['meeting_link'], $_POST['schedule_date_time'], $status, $duration, $timezone];
 
         if ($hasDescription) {
             array_splice($columns, 1, 0, ['description']);
@@ -239,8 +290,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $old_webinar = $stmt->fetch(PDO::FETCH_ASSOC);
 
         // Handle optional new file uploads
-        $host_pic_path = handleUpload('host_pic');
-        $webinar_vid_path = handleUpload('webinar_vid');
+        $host_pic_path = handleUpload('host_pic', 'uploads/', ['jpg', 'jpeg', 'png']);
+        $webinar_vid_path = handleUpload('webinar_vid', 'uploads/', ['mp4']);
+        
+        if (!empty($uploadError)) {
+            $_SESSION['di'] = ['type' => 'error', 'title' => 'Upload Error', 'message' => $uploadError];
+            header('Location: webinars.php');
+            exit;
+        }
         
         // Build update query dynamically based on whether files were uploaded
         $description = trim($_POST['description'] ?? '');
@@ -268,13 +325,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $size = (int)($it['size'] ?? 20);
             if ($size < 10) $size = 10;
             if ($size > 80) $size = 80;
+            $spacing = (int)($it['spacing'] ?? 8);
+            if ($spacing < 0) $spacing = 0;
+            if ($spacing > 64) $spacing = 64;
             $color = trim((string)($it['color'] ?? '#ffffff'));
             if (!preg_match('/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/', $color)) $color = '#ffffff';
             if ($color !== '' && $color[0] !== '#') $color = '#' . $color;
             $bold = !empty($it['bold']) ? 1 : 0;
             $font = (string)($it['font'] ?? 'system_sans');
             if (!in_array($font, $allowedFonts, true)) $font = 'system_sans';
-            $cleanItems[] = ['text' => $text, 'size' => $size, 'color' => $color, 'bold' => $bold, 'font' => $font];
+            $cleanItems[] = ['text' => $text, 'size' => $size, 'spacing' => $spacing, 'color' => $color, 'bold' => $bold, 'font' => $font];
             if (count($cleanItems) >= 12) break;
         }
         if (!empty($cleanItems)) {
@@ -285,13 +345,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
         $finalSubheadingItemsJson = !empty($cleanItems) ? json_encode($cleanItems, JSON_UNESCAPED_UNICODE) : null;
         $duration = trim($_POST['duration'] ?? '60-minute');
+        $timezone = trim($_POST['timezone'] ?? 'America/New_York');
 
         if ($hasDescription) {
-            $updateQuery = "UPDATE webinar_tbl SET title=?, description=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?, duration=?";
-            $params = [$_POST['title'], $description, $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status'], $duration];
+            $updateQuery = "UPDATE webinar_tbl SET title=?, description=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?, duration=?, timezone=?";
+            $params = [$_POST['title'], $description, $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status'], $duration, $timezone];
         } else {
-            $updateQuery = "UPDATE webinar_tbl SET title=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?, duration=?";
-            $params = [$_POST['title'], $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status'], $duration];
+            $updateQuery = "UPDATE webinar_tbl SET title=?, hostname=?, `schedule_date&time`=?, webinar_link=?, status=?, duration=?, timezone=?";
+            $params = [$_POST['title'], $_POST['hostname'], $_POST['schedule_date_time'], $_POST['meeting_link'], $_POST['status'], $duration, $timezone];
         }
         if ($hasHostDescription) {
             $updateQuery .= ", host_description=?";
@@ -359,7 +420,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 // Pagination Logic
 $limit = 5;
 $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
-$offset = ($page - 1) * $limit;
+$offset = (int)(($page - 1) * $limit);
+
+// Sanitize limit and offset as extra security
+$limit = max(1, min((int)$limit, 100)); // Between 1 and 100
+$offset = max(0, (int)$offset);
 
 // Fetch Data
 $total_webinars = $pdo->query("SELECT COUNT(*) FROM webinar_tbl")->fetchColumn();
@@ -586,6 +651,7 @@ function webinar_subheading_font_stack($key) {
                                                 </span>
                                             <?php else: ?>
                                                 <form method="POST" class="inline js-confirm" data-message="Publish this webinar to the Landing Page? This will replace the currently published webinar." data-kind="info">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                                                     <input type="hidden" name="action" value="publish_webinar">
                                                     <input type="hidden" name="id" value="<?php echo $w['webinar_id']; ?>">
                                                     <button type="submit" class="w-10 h-10 flex items-center justify-center text-indigo-600 hover:text-white bg-indigo-50 hover:bg-indigo-600 rounded-xl transition-all border border-transparent hover:border-indigo-600 shadow-sm hover:shadow tooltip-trigger" title="Publish to Landing Page">
@@ -622,6 +688,7 @@ function webinar_subheading_font_stack($key) {
                                             
                                             <!-- Delete Form -->
                                             <form method="POST" class="inline js-confirm" data-message="Are you sure you want to delete this webinar?" data-kind="danger">
+                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                                                 <input type="hidden" name="action" value="delete_webinar">
                                                 <input type="hidden" name="id" value="<?php echo $w['webinar_id']; ?>">
                                                 <button type="submit" class="w-10 h-10 flex items-center justify-center text-rose-600 hover:text-white bg-rose-50 hover:bg-rose-600 rounded-xl transition-all border border-transparent hover:border-rose-600 shadow-sm hover:shadow tooltip-trigger" title="Delete Webinar">
@@ -709,6 +776,7 @@ function webinar_subheading_font_stack($key) {
                                     <!-- Form Body -->
                                     <div class="relative flex-1 px-6 pt-10 pb-32 sm:px-8">
                                         <form method="POST" enctype="multipart/form-data" class="space-y-12" id="addWebinarForm">
+                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                                             <input type="hidden" name="action" value="add_webinar">
                                             
                                             <!-- Section 1: Basic Info -->
@@ -769,9 +837,6 @@ function webinar_subheading_font_stack($key) {
                                                                 <i class="far fa-calendar-alt text-sm"></i>
                                                             </div>
                                                         </div>
-                                                        <p class="text-[10px] font-bold text-slate-400 mt-2 uppercase tracking-tight">
-                                                            Timezone: <span id="addScheduleTz">Detecting...</span>
-                                                        </p>
                                                     </div>
                                                     <div>
                                                         <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Duration</label>
@@ -922,6 +987,7 @@ function webinar_subheading_font_stack($key) {
 
                             <div class="relative flex-1 px-6 pt-10 pb-32 sm:px-8">
                                 <form method="POST" id="editWebinarForm" enctype="multipart/form-data" class="space-y-12">
+                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                                     <input type="hidden" name="action" value="edit_webinar">
                                     <input type="hidden" name="webinar_id" id="modalWebinarId">
                                     
@@ -1036,9 +1102,6 @@ function webinar_subheading_font_stack($key) {
                                                         <i class="far fa-calendar-alt text-sm"></i>
                                                     </div>
                                                 </div>
-                                                <p class="text-[10px] font-bold text-slate-400 mt-2 uppercase tracking-tight">
-                                                    Timezone: <span id="editScheduleTz">Detecting...</span>
-                                                </p>
                                             </div>
                                             <div>
                                                 <label class="block text-sm font-bold text-slate-900 dark:text-slate-300 mb-2">Duration</label>
@@ -1377,6 +1440,12 @@ function webinar_subheading_font_stack($key) {
             return Math.max(10, Math.min(80, n));
           }
 
+          function safeSpacing(v) {
+            const n = parseInt(v, 10);
+            if (!isFinite(n)) return 8;
+            return Math.max(0, Math.min(64, n));
+          }
+
           function safeFont(v) {
             const s = String(v || 'system_sans');
             return fontOptions.some(o => o.value === s) ? s : 'system_sans';
@@ -1407,6 +1476,7 @@ function webinar_subheading_font_stack($key) {
           function itemTemplate(item, theme) {
             const font = safeFont(item.font);
             const size = safeSize(item.size);
+            const spacing = safeSpacing(item.spacing);
             const color = safeColor(item.color);
             const bold = !!item.bold;
             
@@ -1439,6 +1509,14 @@ function webinar_subheading_font_stack($key) {
                     <input type="hidden" class="subheading-item-size" value="${size}">
                   </div>
 
+                  <!-- Spacing Controls -->
+                  <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-900 rounded-xl">
+                    <button type="button" class="spacing-decrement text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"><i class="fas fa-minus-circle"></i></button>
+                    <span class="text-xs font-bold text-slate-700 dark:text-slate-200 min-w-[36px] text-center">${spacing}px</span>
+                    <button type="button" class="spacing-increment text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"><i class="fas fa-plus-circle"></i></button>
+                    <input type="hidden" class="subheading-item-spacing" value="${spacing}">
+                  </div>
+
                   <!-- Bold Toggle -->
                   <button type="button" class="bold-toggle-btn w-10 h-10 inline-flex items-center justify-center rounded-xl border-2 transition-all ${bold ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white dark:bg-slate-800 border-slate-100 dark:border-slate-700 text-slate-400 hover:border-slate-200 dark:hover:border-slate-600'}">
                     <i class="fas fa-bold"></i>
@@ -1465,9 +1543,10 @@ function webinar_subheading_font_stack($key) {
               if (!text) return;
               const font = safeFont(el.querySelector('.subheading-item-font')?.value);
               const size = safeSize(el.querySelector('.subheading-item-size')?.value);
+              const spacing = safeSpacing(el.querySelector('.subheading-item-spacing')?.value);
               const color = safeColor(el.querySelector('.subheading-item-color')?.value);
               const bold = !!el.querySelector('.subheading-item-bold')?.checked;
-              items.push({ text, font, size, color, bold });
+              items.push({ text, font, size, spacing, color, bold });
             });
             return items.slice(0, 12);
           }
@@ -1479,6 +1558,7 @@ function webinar_subheading_font_stack($key) {
               const textEl = el.querySelector('.subheading-item-text');
               const font = safeFont(el.querySelector('.subheading-item-font')?.value);
               const size = safeSize(el.querySelector('.subheading-item-size')?.value);
+              const spacing = safeSpacing(el.querySelector('.subheading-item-spacing')?.value);
               const color = safeColor(el.querySelector('.subheading-item-color')?.value);
               const bold = !!el.querySelector('.subheading-item-bold')?.checked;
               if (textEl) {
@@ -1486,6 +1566,7 @@ function webinar_subheading_font_stack($key) {
                 textEl.style.fontSize = size + 'px';
                 textEl.style.color = color;
                 textEl.style.fontWeight = bold ? 800 : 600;
+                textEl.style.marginBottom = spacing + 'px';
               }
             });
             if (hiddenText) hiddenText.value = items.map(i => i.text).join('\n');
@@ -1504,7 +1585,7 @@ function webinar_subheading_font_stack($key) {
 
           function addItem(container, theme, item) {
             const wrapper = document.createElement('div');
-            wrapper.innerHTML = itemTemplate(item || { text: '', font: 'system_sans', size: 20, color: '#ffffff', bold: true }, theme);
+            wrapper.innerHTML = itemTemplate(item || { text: '', font: 'system_sans', size: 20, spacing: 8, color: '#ffffff', bold: true }, theme);
             const node = wrapper.firstElementChild;
             container.appendChild(node);
             refreshRemoveButtons(container);
@@ -1513,7 +1594,7 @@ function webinar_subheading_font_stack($key) {
 
           function clearAndSet(container, theme, items) {
             container.innerHTML = '';
-            const list = Array.isArray(items) && items.length ? items : [{ text: '', font: 'system_sans', size: 20, color: '#ffffff', bold: true }];
+            const list = Array.isArray(items) && items.length ? items : [{ text: '', font: 'system_sans', size: 20, spacing: 8, color: '#ffffff', bold: true }];
             list.forEach(it => addItem(container, theme, it));
           }
 
@@ -1561,24 +1642,6 @@ function webinar_subheading_font_stack($key) {
             const addContainer = document.getElementById('addSubheadingItems');
             if (addContainer) {
               sync(addContainer, document.getElementById('addSubheadingHidden'), document.getElementById('addSubheadingItemsJson'));
-            }
-
-            const addScheduleTz = document.getElementById('addScheduleTz');
-            const editScheduleTz = document.getElementById('editScheduleTz');
-            try {
-                const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local Time';
-                const now = new Date();
-                const offsetMin = -now.getTimezoneOffset();
-                const sign = offsetMin >= 0 ? '+' : '-';
-                const abs = Math.abs(offsetMin);
-                const hh = String(Math.floor(abs / 60)).padStart(2, '0');
-                const mm = String(abs % 60).padStart(2, '0');
-                const tzText = `${tz} (UTC${sign}${hh}:${mm})`;
-                if (addScheduleTz) addScheduleTz.textContent = tzText;
-                if (editScheduleTz) editScheduleTz.textContent = tzText;
-            } catch (e) {
-                if (addScheduleTz) addScheduleTz.textContent = 'Local Time';
-                if (editScheduleTz) editScheduleTz.textContent = 'Local Time';
             }
 
             // File Upload Previews for Add Webinar
@@ -1716,6 +1779,22 @@ function webinar_subheading_font_stack($key) {
                   hidden.value = val;
                   display.textContent = val + 'px';
                   syncForm((sizeInc || sizeDec).closest('form'));
+                  return;
+              }
+
+              // Spacing controls
+              const spacingInc = e.target.closest('.spacing-increment');
+              const spacingDec = e.target.closest('.spacing-decrement');
+              if (spacingInc || spacingDec) {
+                  const item = (spacingInc || spacingDec).closest('.flex');
+                  const hidden = item.querySelector('.subheading-item-spacing');
+                  const display = item.querySelector('span');
+                  let val = parseInt(hidden.value, 10);
+                  if (spacingInc) val = Math.min(64, val + 2);
+                  else val = Math.max(0, val - 2);
+                  hidden.value = val;
+                  display.textContent = val + 'px';
+                  syncForm((spacingInc || spacingDec).closest('form'));
                   return;
               }
 

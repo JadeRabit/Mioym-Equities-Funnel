@@ -23,6 +23,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    // Rate limiting check
+    $rateLimit = check_login_rate_limit($pdo, $_POST['username'] ?? null);
+    if ($rateLimit['blocked']) {
+        $minutes = ceil($rateLimit['remaining_seconds'] / 60);
+        $_SESSION['di'] = ['type' => 'error', 'title' => 'Rate Limited', 'message' => "Too many failed attempts. Please try again in {$minutes} minute(s)."];
+        $dest = !empty($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'index.php';
+        header('Location: ' . $dest);
+        exit;
+    }
+
     $recaptcha_secret_key = get_setting('recaptcha_secret_key', '') ?: (getenv('RECAPTCHA_SECRET_KEY') ?: '');
     $recaptcha_response = trim((string)($_POST['g-recaptcha-response'] ?? ''));
     if ($recaptcha_secret_key === '' || $recaptcha_response === '') {
@@ -79,6 +89,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Verify password using only secure hashes
     if ($admin && password_verify($password, $admin['password'])) {
+        // Clear rate limit on successful login
+        clear_login_rate_limit($pdo, $username);
+        
         session_regenerate_id(true);
         $_SESSION['admin_logged_in'] = true;
         $_SESSION['admin_username'] = $admin['username'];
@@ -127,6 +140,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: admin.php');
         exit;
     } else {
+        // Record failed login attempt for rate limiting
+        record_failed_login($pdo, $username);
+        
         $_SESSION['di'] = ['type' => 'warn', 'title' => 'Login Failed', 'message' => 'Invalid credentials. Please check your username and password.'];
         $dest = !empty($_SERVER['HTTP_REFERER']) ? $_SERVER['HTTP_REFERER'] : 'index.php';
         $connector = (strpos($dest, '?') !== false) ? '&' : '?';

@@ -32,16 +32,21 @@ $webinarVid = $latestWebinar['webinar_vid'] ?? null;
 // Dynamic schedule formatting
 $scheduleDateStr = 'Date to be announced';
 $scheduleTimeStr = '';
+$scheduleDateTimeCardStr = 'Date to be announced';
 
 if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
     $base = $latestWebinar['schedule_date&time'];
-    $ldn = new DateTime($base, new DateTimeZone('Europe/London'));
-    $ny  = new DateTime($base, new DateTimeZone('America/New_York'));
+    $tzString = $latestWebinar['timezone'] ?? 'America/New_York';
     
-    $scheduleDateStr = $ldn->format('l, F j, Y');
-    $timeL = strtolower($ldn->format('g:i A')) . ' ' . $ldn->format('T');
-    $timeN = strtolower($ny->format('g:i A')) . ' ' . $ny->format('T');
-    $scheduleTimeStr = $timeL . ' | ' . $timeN;
+    try {
+        $dateObj = new DateTime($base, new DateTimeZone($tzString));
+    } catch (Exception $e) {
+        $dateObj = new DateTime($base, new DateTimeZone('America/New_York'));
+    }
+    
+    $scheduleDateStr = $dateObj->format('l, F j, Y');
+    $scheduleTimeStr = strtolower($dateObj->format('g:i A'));
+    $scheduleDateTimeCardStr = $dateObj->format('l, F j, g:i A');
 }
 ?>
 <!DOCTYPE html>
@@ -88,9 +93,7 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
         <!-- Main confirmation card -->
         <div class="bg-white rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl border border-slate-100 p-6 sm:p-10 md:p-12 relative overflow-hidden">
             <!-- Success checkmark animation -->
-            <div class="absolute top-0 right-0 w-32 h-32 sm:w-40 sm:h-40 bg-green-50 rounded-bl-full -z-5"></div>
-            
-            <div class="text-center mb-8 sm:mb-10">
+             <div class="text-center mb-8 sm:mb-10">
                 <div class="bg-green-100 text-green-600 w-20 h-20 sm:w-24 sm:h-24 rounded-full flex items-center justify-center text-4xl sm:text-5xl mx-auto mb-6 shadow-lg border-4 border-white">
                     <i class="fas fa-check-circle"></i>
                 </div>
@@ -98,20 +101,46 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
                     Thank You, <span class="text-[#1e4a7a]"><?php echo $name; ?></span>!
                 </h1>
                 <p class="text-lg sm:text-xl text-slate-600 font-medium">You're successfully registered.</p>
-            </div>
-
-            <!-- Confirmation message box -->
-            <div class="bg-blue-50/50 border-l-4 border-[#1e4a7a] rounded-r-2xl p-5 sm:p-6 mb-8 sm:mb-10">
-                <div class="flex items-start gap-4">
-                    <div class="w-10 h-10 bg-[#1e4a7a] rounded-xl flex items-center justify-center text-white flex-shrink-0">
-                        <i class="fas fa-envelope-open-text text-lg"></i>
+             </div>
+             <!-- Confirmation message box -->
+            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-2xl p-6 sm:p-8 mb-8 sm:mb-10 shadow-lg border border-blue-100">
+                <div class="flex items-start gap-5">
+                    <div class="w-12 h-12 bg-gradient-to-br from-[#1e4a7a] to-blue-600 rounded-2xl flex items-center justify-center text-white flex-shrink-0 shadow-lg shadow-blue-900/20">
+                        <i class="fas fa-envelope-open-text text-xl"></i>
                     </div>
-                    <div>
-                        <h3 class="font-bold text-slate-900 text-lg">Email sent!</h3>
-                        <p class="text-sm sm:text-base text-slate-600 leading-relaxed">Check your inbox for the access link and calendar invite.</p>
+                    <div class="flex-1">
+                        <h3 class="font-extrabold text-slate-900 text-xl mb-2 tracking-tight">Email sent!</h3>
+                        <p class="text-sm sm:text-base text-slate-700 leading-relaxed font-medium">Check your inbox for the access link and calendar invite.</p>
                     </div>
                 </div>
             </div>
+            <div class="absolute top-0 right-0 w-32 h-32 sm:w-40 sm:h-40 bg-green-50 rounded-bl-full -z-5"></div>
+            <p class="text-base sm:text-lg font-black text-slate-900 tracking-tight text-center mb-5">
+                MIOYM - <?php echo htmlspecialchars($webinarTitle); ?>
+            </p>
+
+            <div class="mb-5 sm:mb-10 overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
+                <img
+                    src="img/Screenshot%202026-04-18%20023607.png"
+                    alt="MIOYM briefing banner"
+                    class="w-full h-auto object-cover"
+                >
+            </div>
+            
+            <div class="text-center mb-8 sm:mb-10">
+                <div class="mb-8 sm:mb-10 rounded-2xl border border-blue-100 bg-blue-50/60 p-5 sm:p-6">
+                    <p class="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                        MIOYM - <?php echo htmlspecialchars($webinarTitle); ?>
+                    </p>
+                    <p class="mt-2 text-sm sm:text-base font-bold text-[#1e4a7a]">
+                        <?php echo htmlspecialchars($scheduleDateTimeCardStr); ?>
+                    </p>
+                    <p class="mt-3 text-sm sm:text-base text-slate-700 leading-relaxed">
+                        This 30-minute technical briefing is designed for institutional partners and sophisticated investors seeking a transparent evaluation of our asset management framework. We will conduct a comprehensive breakdown of the operational and financial structures that define our investment model, focusing on the interplay between capital security and project velocity.
+                    </p>
+                </div>
+            </div>
+            
 
             <!-- Webinar Video -->
             <div class="mb-8 sm:mb-10">
@@ -176,7 +205,7 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
                             <div>
                                 <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Platform</p>
                                 <p class="font-bold text-slate-900">Zoom Webinar</p>
-                                <p class="text-sm text-slate-600 font-medium">Link will be sent via email</p>
+                                <p class="text-sm text-slate-600 font-medium">Registered via Zoom</p>
                             </div>
                         </div>
                     </div>
@@ -208,15 +237,15 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
                         <div class="w-8 h-8 bg-[#1e4a7a] text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 shadow-lg shadow-blue-900/20">1</div>
                         <div>
                             <p class="font-bold text-slate-900">Check your email</p>
-                            <p class="text-sm text-slate-600 leading-relaxed">We sent a confirmation with calendar invite. If you don't see it within 10 minutes, check your spam folder.</p>
+                            <p class="text-sm text-slate-600 leading-relaxed">An email should send your webinar confirmation and reminder emails. If you don't see them, check spam.</p>
                         </div>
                     </div>
                     
                     <div class="flex items-start gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm transition-all hover:shadow-md hover:border-blue-100">
                         <div class="w-8 h-8 bg-[#1e4a7a] text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 shadow-lg shadow-blue-900/20">2</div>
                         <div>
-                            <p class="font-bold text-slate-900">Add to calendar</p>
-                            <p class="text-sm text-slate-600 leading-relaxed">Click the calendar link in the email to save the event and avoid missing it.</p>
+                            <p class="font-bold text-slate-900">Add to your calendar</p>
+                            <p class="text-sm text-slate-600 leading-relaxed">Use the email invite to save the event so you get on-time reminders.</p>
                         </div>
                     </div>
                     
@@ -224,7 +253,7 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
                         <div class="w-8 h-8 bg-[#1e4a7a] text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 shadow-lg shadow-blue-900/20">3</div>
                         <div>
                             <p class="font-bold text-slate-900">Prepare your questions</p>
-                            <p class="text-sm text-slate-600 leading-relaxed">The session includes a live Q&A. Think about your investment goals and write down any questions for <?php echo explode(' ', $hostName)[0]; ?>.</p>
+                            <p class="text-sm text-slate-600 leading-relaxed">The session includes live Q&A. Prepare your investment questions for <?php echo explode(' ', $hostName)[0]; ?>.</p>
                         </div>
                     </div>
                 </div>
@@ -235,8 +264,8 @@ if ($latestWebinar && !empty($latestWebinar['schedule_date&time'])) {
                 <a href="index.php" class="bg-[#1e4a7a] hover:bg-[#123a5e] text-white font-bold px-10 py-4 rounded-2xl shadow-xl shadow-blue-900/20 transition-all hover:-translate-y-1 inline-flex items-center justify-center gap-3">
                     <i class="fas fa-home"></i> Back to Homepage
                 </a>
-                <a href="<?php echo htmlspecialchars($meetingLink); ?>" target="_blank" class="bg-amber-400 hover:bg-amber-300 text-[#0f2b44] font-bold px-10 py-4 rounded-2xl shadow-xl shadow-amber-500/20 transition-all hover:-translate-y-1 inline-flex items-center justify-center gap-3">
-                    <i class="fas fa-video"></i> Access Webinar Link
+                <a href="<?php echo htmlspecialchars($meetingLink); ?>" target="_blank" rel="noopener noreferrer" class="bg-amber-400 hover:bg-amber-300 text-[#0f2b44] font-bold px-10 py-4 rounded-2xl shadow-xl shadow-amber-500/20 transition-all hover:-translate-y-1 inline-flex items-center justify-center gap-3">
+                    <i class="fas fa-video"></i> Open Webinar Link
                 </a>
             </div>
 

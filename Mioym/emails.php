@@ -10,7 +10,28 @@ if (!isset($_SESSION['admin_logged_in'])) {
     exit;
 }
 
+// CSRF Protection
+if (!isset($_SESSION['csrf']) || !isset($_SESSION['csrf']['value']) || time() >= (int)($_SESSION['csrf']['expires'] ?? 0)) {
+    $_SESSION['csrf'] = [
+        'value' => bin2hex(random_bytes(32)),
+        'expires' => time() + 900
+    ];
+}
+
+function validate_csrf_emails($token) {
+    if (!isset($_SESSION['csrf']['value']) || !isset($_SESSION['csrf']['expires'])) return false;
+    if (time() >= (int)$_SESSION['csrf']['expires']) return false;
+    return hash_equals($_SESSION['csrf']['value'], (string)$token);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    $csrf = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_emails($csrf)) {
+        $_SESSION['di'] = ['type' => 'error', 'title' => 'Security', 'message' => 'Security check failed. Please try again.'];
+        header('Location: emails.php');
+        exit;
+    }
+    
     $action = $_POST['action'];
 
     if ($action === 'send_emails' || $action === 'send_test_email') {
@@ -51,82 +72,163 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $stmt = $pdo->prepare("SELECT $selectFields FROM registrants_tbl r LEFT JOIN webinar_tbl w ON r.webinar_id = w.webinar_id WHERE r.webinar_id = ?");
                 $stmt->execute([$webinar_id]);
             }
-            $registrantsToSend = $stmt->fetchAll(PDO::FETCH_ASSOC);
         }
         
         $sentCount = 0;
-        foreach ($registrantsToSend as $registrant) {
-            if (empty($registrant['email'])) continue;
+        $failedCount = 0;
+        
+        // Optimize for 100k+: Chunk processing and send via Brevo Batch API
+        $chunkSize = 500; // Brevo allows up to a certain limit per batch request
+        $messageVersions = [];
+        $updateIds = [];
 
-            $personalLink = $registrant['webinar_link'] ?? 'Link not set yet';
-            $rawDate = $registrant['schedule_date&time'] ?? null;
-            $webinarDate = 'To be announced';
-            if ($rawDate && strtotime($rawDate)) {
-                $webinarDate = date('F j, Y \a\t g:i A', strtotime($rawDate));
-            }
-            $webinarTitle = $registrant['webinar_title'] ?? 'Exclusive Webinar';
-            $webinarDuration = $registrant['duration'] ?? get_setting('webinar_duration', '60-minute');
+        // Helper function to send chunk
+        $sendChunk = function($versions, $ids, $isTest = false) use ($pdo, $subject, &$sentCount, &$failedCount) {
+            if (empty($versions)) return;
             
-            // Replace template variables
-            $body = str_replace(
-                [
-                    '[Name]', 
-                    '[Link]',
-                    '[WebinarDate]',
-                    '[WebinarTitle]',
-                    '[WebinarDuration]',
-                    '[CompanyAddress]',
-                    '[UnsubscribeLink]',
-                    '[PrivacyPolicy]'
-                ],
-                [
-                    htmlspecialchars($registrant['fullname']), 
-                    htmlspecialchars($personalLink),
-                    htmlspecialchars($webinarDate),
-                    htmlspecialchars($webinarTitle),
-                    htmlspecialchars($webinarDuration),
-                    get_setting('office_address', '2900 Westchester Ave Purchase, NY 10577'),
-                    'https://mioym.com/unsubscribe',
-                    'https://mioym.com/privacy'
-                ],
-                $emailTemplateBase
-            );
-
-            // ALSO replace the dynamic content from the editor which might have tags too
-            $dynamicContent = str_replace(
-                ['[Name]', '[Link]', '[WebinarDate]', '[WebinarTitle]', '[WebinarDuration]'],
-                [htmlspecialchars($registrant['fullname']), htmlspecialchars($personalLink), htmlspecialchars($webinarDate), htmlspecialchars($webinarTitle), htmlspecialchars($webinarDuration)],
-                $email_template_content
-            );
-
-            // If the template has a [MessageContent] placeholder, replace it
-            if (strpos($body, '[MessageContent]') !== false) {
-                $body = str_replace('[MessageContent]', $dynamicContent, $body);
-            } else {
-                // Fallback: if no placeholder, just append or replace a common tag
-                $body = str_replace('[Name]', htmlspecialchars($registrant['fullname']), $body);
-                // This logic depends on the actual template structure.
-            }
-
-            $res = send_brevo_api_email($registrant['email'], $registrant['fullname'], $subject, $body);
-
-            if ($res['success']) {
-                $sentCount++;
-                if (isset($registrant['id']) && $registrant['id'] > 0) {
-                    $stmtUpdate = $pdo->prepare("UPDATE registrants_tbl SET email_sent = 1 WHERE id = ?");
-                    $stmtUpdate->execute([$registrant['id']]);
+            if ($isTest) {
+                // Test emails are sent immediately
+                if (function_exists('send_brevo_batch_email')) {
+                    $res = send_brevo_batch_email($subject, '<html><body>{{params.body}}</body></html>', $versions);
+                    if ($res['success']) {
+                        $sentCount += count($versions);
+                    } else {
+                        $failedCount += count($versions);
+                    }
+                } else {
+                    foreach ($versions as $mv) {
+                        $res = send_brevo_api_email($mv['to'][0]['email'], $mv['to'][0]['name'], $mv['subject'], $mv['htmlContent']);
+                        if ($res['success']) $sentCount++; else $failedCount++;
+                    }
                 }
-                log_email_notification($pdo, $registrant['email'], $subject, 'sent');
             } else {
-                log_email_notification($pdo, $registrant['email'], $subject, 'failed', $res['error']);
+                // Bulk emails are queued for the daily drip
+                $stmt = $pdo->prepare("INSERT INTO email_queue (to_email, to_name, subject, html_content, status) VALUES (?, ?, ?, ?, 'pending')");
+                foreach ($versions as $mv) {
+                    try {
+                        $stmt->execute([$mv['to'][0]['email'], $mv['to'][0]['name'], $mv['subject'], $mv['htmlContent']]);
+                        $sentCount++;
+                    } catch (PDOException $e) {
+                        $failedCount++;
+                    }
+                }
+                if (!empty($ids)) {
+                    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                    $stmtUpdate = $pdo->prepare("UPDATE registrants_tbl SET email_sent = 1 WHERE id IN ($placeholders)");
+                    $stmtUpdate->execute($ids);
+                }
             }
+        };
+
+        if ($action === 'send_test_email') {
+            // For test email, we just send one manually constructed payload immediately
+            $sendChunk([ [
+                'to' => [['email' => $registrantsToSend[0]['email'], 'name' => $registrantsToSend[0]['fullname']]],
+                'subject' => $subject,
+                'htmlContent' => str_replace(
+                    ['{{firstName}}', '*|FNAME|*', '[Name]', '[Link]', '[WebinarDate]', '[WebinarTitle]', '[WebinarDuration]', '[CompanyAddress]', '[UnsubscribeLink]', '[PrivacyPolicy]'],
+                    [$registrantsToSend[0]['fullname'], $registrantsToSend[0]['fullname'], $registrantsToSend[0]['fullname'], $registrantsToSend[0]['webinar_link'], $registrantsToSend[0]['schedule_date&time'], $registrantsToSend[0]['webinar_title'], $registrantsToSend[0]['duration'], get_setting('office_address', '2900 Westchester Ave Purchase, NY 10577'), 'https://mioym.com/unsubscribe', 'https://mioym.com/privacy'],
+                    $emailTemplateBase
+                )
+            ] ], [], true);
+        } elseif (!empty($targetEmails)) {
+            // Pre-defined target emails loop
+            foreach ($registrantsToSend as $registrant) {
+                $fullNameSafe = htmlspecialchars((string)($registrant['fullname'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                $parts = preg_split('/\s+/', $fullNameSafe, -1, PREG_SPLIT_NO_EMPTY);
+                $firstNameSafe = $parts ? $parts[0] : '';
+                if ($firstNameSafe === '') $firstNameSafe = $fullNameSafe;
+                
+                $messageVersions[] = [
+                    'to' => [['email' => $registrant['email'], 'name' => $fullNameSafe]],
+                    'subject' => $subject,
+                    'htmlContent' => str_replace(
+                        ['{{firstName}}', '*|FNAME|*', '[Name]', '[Link]', '[WebinarDate]', '[WebinarTitle]', '[WebinarDuration]', '[CompanyAddress]', '[UnsubscribeLink]', '[PrivacyPolicy]'],
+                        [$firstNameSafe, $firstNameSafe, $fullNameSafe, htmlspecialchars((string)($registrant['webinar_link']??''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), htmlspecialchars((string)($registrant['schedule_date&time']??''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), htmlspecialchars((string)($registrant['webinar_title']??''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), htmlspecialchars((string)($registrant['duration']??''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'), get_setting('office_address', '2900 Westchester Ave Purchase, NY 10577'), 'https://mioym.com/unsubscribe', 'https://mioym.com/privacy'],
+                        $emailTemplateBase
+                    )
+                ];
+                if (count($messageVersions) >= $chunkSize) {
+                    $sendChunk($messageVersions, $updateIds);
+                    $messageVersions = [];
+                    $updateIds = [];
+                }
+            }
+        } else {
+            // Streaming directly from database to avoid memory exhaustion on 100k+ rows
+            while ($registrant = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                if (empty($registrant['email'])) continue;
+
+                $personalLink = $registrant['webinar_link'] ?? 'Link not set yet';
+                $rawDate = $registrant['schedule_date&time'] ?? null;
+                $webinarDate = 'To be announced';
+                if ($rawDate && strtotime($rawDate)) {
+                    $webinarDate = date('F j, Y \a\t g:i A', strtotime($rawDate));
+                }
+                $webinarTitle = $registrant['webinar_title'] ?? 'Exclusive Webinar';
+                $webinarDuration = $registrant['duration'] ?? get_setting('webinar_duration', '60-minute');
+
+                $fullNameSafe = htmlspecialchars((string)($registrant['fullname'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                $parts = preg_split('/\s+/', $fullNameSafe, -1, PREG_SPLIT_NO_EMPTY);
+                $firstNameSafe = $parts ? $parts[0] : '';
+                if ($firstNameSafe === '') $firstNameSafe = $fullNameSafe;
+
+                $messageVersions[] = [
+                    'to' => [
+                        ['email' => $registrant['email'], 'name' => $fullNameSafe]
+                    ],
+                    'subject' => $subject,
+                    'htmlContent' => str_replace(
+                        [
+                            '{{firstName}}',
+                            '*|FNAME|*',
+                            '[Name]', 
+                            '[Link]',
+                            '[WebinarDate]',
+                            '[WebinarTitle]',
+                            '[WebinarDuration]',
+                            '[CompanyAddress]',
+                            '[UnsubscribeLink]',
+                            '[PrivacyPolicy]'
+                        ],
+                        [
+                            $firstNameSafe,
+                            $firstNameSafe,
+                            $fullNameSafe, 
+                            htmlspecialchars((string)$personalLink, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                            htmlspecialchars((string)$webinarDate, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                            htmlspecialchars((string)$webinarTitle, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                            htmlspecialchars((string)$webinarDuration, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+                            get_setting('office_address', '2900 Westchester Ave Purchase, NY 10577'),
+                            'https://mioym.com/unsubscribe',
+                            'https://mioym.com/privacy'
+                        ],
+                        $emailTemplateBase
+                    )
+                ];
+
+                if (isset($registrant['id']) && $registrant['id'] > 0) {
+                    $updateIds[] = $registrant['id'];
+                }
+
+                if (count($messageVersions) >= $chunkSize) {
+                    $sendChunk($messageVersions, $updateIds);
+                    $messageVersions = [];
+                    $updateIds = [];
+                }
+            }
+        }
+        
+        // Send any remaining items
+        if (!empty($messageVersions)) {
+            $sendChunk($messageVersions, $updateIds);
         }
         
         if ($action === 'send_test_email') {
             echo json_encode(['success' => true, 'message' => "Successfully sent test email."]);
             exit;
         } else {
-            $_SESSION['flash'] = "Successfully sent $sentCount emails.";
+            $_SESSION['flash'] = "Successfully queued $sentCount emails. They will be sent automatically by the background processor (300 per day limit).";
             $_SESSION['di'] = ['type' => 'success', 'title' => 'Email Campaign', 'message' => $_SESSION['flash']];
             $referer = $_SERVER['HTTP_REFERER'] ?? 'registrants.php';
             header("Location: $referer");
@@ -184,6 +286,7 @@ $countsByWebinar = $pdo->query("SELECT webinar_id, COUNT(*) as count FROM regist
 
         <!-- Main Content -->
         <main class="flex-1 overflow-y-auto bg-slate-50 p-6 md:p-8" x-data="campaignBuilder()">
+            <input type="hidden" id="csrf-token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
             <div class="flex justify-between items-center mb-8">
                 <div>
                     <h2 class="text-3xl font-extrabold text-slate-900 tracking-tight">Campaign Builder</h2>
@@ -516,6 +619,7 @@ $countsByWebinar = $pdo->query("SELECT webinar_id, COUNT(*) as count FROM regist
                     
                     // Create FormData
                     const formData = new FormData();
+                    formData.append('csrf_token', document.getElementById('csrf-token').value);
                     formData.append('action', 'send_test_email');
                     formData.append('email_template', this.renderedContent);
                     formData.append('subject', this.subject);
@@ -553,6 +657,7 @@ $countsByWebinar = $pdo->query("SELECT webinar_id, COUNT(*) as count FROM regist
                                 form.action = 'emails.php';
                                 
                                 const inputs = {
+                                    csrf_token: document.getElementById('csrf-token').value,
                                     action: 'send_emails',
                                     webinar_id: this.selectedWebinar,
                                     email_template: this.renderedContent,

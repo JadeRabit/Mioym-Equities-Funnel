@@ -8,32 +8,51 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     exit;
 }
 
+// CSRF Protection
+if (!isset($_SESSION['csrf']) || !isset($_SESSION['csrf']['value']) || time() >= (int)($_SESSION['csrf']['expires'] ?? 0)) {
+    $_SESSION['csrf'] = [
+        'value' => bin2hex(random_bytes(32)),
+        'expires' => time() + 900
+    ];
+}
+
+function validate_csrf_settings($token) {
+    if (!isset($_SESSION['csrf']['value']) || !isset($_SESSION['csrf']['expires'])) return false;
+    if (time() >= (int)$_SESSION['csrf']['expires']) return false;
+    return hash_equals($_SESSION['csrf']['value'], (string)$token);
+}
+
 $success = '';
 $error = '';
 
 // Handle Settings Update
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_settings'])) {
-    try {
-        $pdo->beginTransaction();
-        
-        $stmt = $pdo->prepare("UPDATE settings_tbl SET setting_value = ? WHERE setting_key = ?");
-        
-        foreach ($_POST['settings'] as $key => $value) {
-            $stmt->execute([$value, $key]);
+    $csrf = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_settings($csrf)) {
+        $error = 'Security check failed. Please try again.';
+    } else {
+        try {
+            $pdo->beginTransaction();
+            
+            $stmt = $pdo->prepare("UPDATE settings_tbl SET setting_value = ? WHERE setting_key = ?");
+            
+            foreach ($_POST['settings'] as $key => $value) {
+                $stmt->execute([$value, $key]);
+            }
+            
+            $pdo->commit();
+            
+            // Log notification
+            admin_notify($pdo, 'settings', 'Settings Updated', 'Global configuration was updated by ' . $_SESSION['admin_username'], 'admin_settings.php');
+            
+            // Refresh global settings array
+            require __DIR__ . '/config.php';
+            
+            $success = 'Settings updated successfully!';
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            $error = 'Error updating settings: ' . $e->getMessage();
         }
-        
-        $pdo->commit();
-        
-        // Log notification
-        admin_notify($pdo, 'settings', 'Settings Updated', 'Global configuration was updated by ' . $_SESSION['admin_username'], 'admin_settings.php');
-        
-        // Refresh global settings array
-        require __DIR__ . '/config.php';
-        
-        $success = 'Settings updated successfully!';
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        $error = 'Error updating settings: ' . $e->getMessage();
     }
 }
 
@@ -78,6 +97,7 @@ $settings = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 </div>
 
                 <form method="POST" action="">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                     <input type="hidden" name="update_settings" value="1">
                     
                     <div class="flat-card overflow-hidden shadow-sm hover:shadow-md transition-shadow">
@@ -94,7 +114,12 @@ $settings = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <div class="p-6 space-y-6">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <?php 
-                                $allowedKeys = ['annual_return', 'support_email', 'office_address', 'office_phone'];
+                                $allowedKeys = [
+                                    'annual_return', 
+                                    'support_email', 
+                                    'office_address', 
+                                    'office_phone'
+                                ];
                                 foreach ($settings as $setting): 
                                     if (!in_array($setting['setting_key'], $allowedKeys)) continue;
                                 ?>

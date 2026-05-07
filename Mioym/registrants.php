@@ -7,9 +7,40 @@ if (!isset($_SESSION['admin_logged_in'])) {
     exit;
 }
 
+// CSRF Protection
+if (!isset($_SESSION['csrf']) || !isset($_SESSION['csrf']['value']) || time() >= (int)($_SESSION['csrf']['expires'] ?? 0)) {
+    $_SESSION['csrf'] = [
+        'value' => bin2hex(random_bytes(32)),
+        'expires' => time() + 900
+    ];
+}
+
+function validate_csrf_registrants($token) {
+    if (!isset($_SESSION['csrf']['value']) || !isset($_SESSION['csrf']['expires'])) return false;
+    if (time() >= (int)$_SESSION['csrf']['expires']) return false;
+    return hash_equals($_SESSION['csrf']['value'], (string)$token);
+}
+
 // Handle Bulk Delete
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_bulk') {
-    $ids = explode(',', $_POST['bulk_ids']);
+    $csrf = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_registrants($csrf)) {
+        $_SESSION['di'] = ['type' => 'error', 'title' => 'Security', 'message' => 'Security check failed. Please try again.'];
+        header('Location: registrants.php');
+        exit;
+    }
+    
+    $rawIds = $_POST['bulk_ids'] ?? '';
+    $ids = explode(',', $rawIds);
+    $ids = array_filter($ids, 'ctype_digit');
+    $ids = array_values($ids);
+    
+    if (empty($ids)) {
+        $_SESSION['di'] = ['type'=>'error','title'=>'Error','message'=>'Invalid selection'];
+        header('Location: registrants.php');
+        exit;
+    }
+    
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
     $stmt = $pdo->prepare("DELETE FROM registrants_tbl WHERE id IN ($placeholders)");
     $stmt->execute($ids);
@@ -27,16 +58,20 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv');
     header('Content-Disposition: attachment; filename="registrants_export.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['ID', 'Full Name', 'Email', 'Phone', 'Registration Date', 'Webinar Title', 'Email Sent']);
+    fputcsv($out, ['ID', 'Full Name', 'Email', 'Phone', 'Registration Date', 'Webinar Title', 'Email Sent', '1W Reminder', '1D Reminder', '1H Reminder', '1M Reminder']);
     
-    $stmt = $pdo->query("SELECT r.id, r.fullname, r.email, r.phone, r.registration_date, w.title as webinar_title, r.email_sent 
+    $stmt = $pdo->query("SELECT r.id, r.fullname, r.email, r.phone, r.registration_date, w.title as webinar_title, r.email_sent, r.reminded_1w, r.reminded_1d, r.reminded_1h, r.reminded_1m 
                          FROM registrants_tbl r 
                          LEFT JOIN webinar_tbl w ON r.webinar_id = w.webinar_id 
                          ORDER BY r.id DESC");
                          
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         $row['email_sent'] = $row['email_sent'] ? 'Yes' : 'No';
-        $row['webinar_title'] = $row['webinar_title'] ?? 'General/Old';
+        $row['reminded_1w'] = $row['reminded_1w'] ? 'Yes' : 'No';
+        $row['reminded_1d'] = $row['reminded_1d'] ? 'Yes' : 'No';
+        $row['reminded_1h'] = $row['reminded_1h'] ? 'Yes' : 'No';
+        $row['reminded_1m'] = $row['reminded_1m'] ? 'Yes' : 'No';
+        $row['webinar_title'] = $row['webinar_title'] ?? 'Uncategorized';
         fputcsv($out, $row);
     }
     fclose($out);
@@ -60,12 +95,8 @@ if ($search !== '') {
 }
 
 if ($category !== '') {
-    if ($category === 'General/Old') {
-        $where_clauses[] = "w.title IS NULL";
-    } else {
-        $where_clauses[] = "w.title = ?";
-        $params[] = $category;
-    }
+    $where_clauses[] = "w.title = ?";
+    $params[] = $category;
 }
 
 if ($status_filter === 'sent') {
@@ -170,7 +201,6 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
                             <?php foreach($webinars as $w): ?>
                                 <option value="<?php echo htmlspecialchars($w); ?>" <?php echo $category === $w ? 'selected' : ''; ?>><?php echo htmlspecialchars($w); ?></option>
                             <?php endforeach; ?>
-                            <option value="General/Old" <?php echo $category === 'General/Old' ? 'selected' : ''; ?>>General/Old</option>
                         </select>
 
                         <div class="flex bg-slate-50 p-1 rounded-xl border border-slate-100">
@@ -185,7 +215,7 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
                 </form>
             </div>
 
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div id="registrants-container" class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                 <div class="max-h-[calc(100vh-320px)] overflow-y-auto">
                     <table id="registrants-table" class="w-full text-left border-collapse <?php echo empty($registrants) ? 'hidden' : ''; ?>">
                         <thead class="sticky-header">
@@ -201,6 +231,7 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
                                 <th class="p-4">Webinar Category</th>
                                 <th class="p-4">Reg. Date</th>
                                 <th class="p-4 text-center">Status</th>
+                                <th class="p-4 text-center">Investor</th>
                                 <th class="p-4 text-right">Actions</th>
                             </tr>
                         </thead>
@@ -259,7 +290,7 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
                                 
                                 <td class="p-4">
                                     <span class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold">
-                                        <?php echo $r['webinar_title'] ? htmlspecialchars($r['webinar_title']) : 'General/Old'; ?>
+                                        <?php echo $r['webinar_title'] ? htmlspecialchars($r['webinar_title']) : 'Uncategorized'; ?>
                                     </span>
                                 </td>
                                 
@@ -279,7 +310,25 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
                                     <?php endif; ?>
                                 </td>
                                 
-                                <td class="p-4 text-right">
+                                <td class="p-4 text-center">
+                                    <?php if(!empty($r['is_accredited'])): ?>
+                                        <span class="inline-flex items-center gap-1.5 bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                                            <i class="fas fa-star"></i> Yes
+                                        </span>
+                                    <?php else: ?>
+                                        <span class="inline-flex items-center gap-1.5 bg-slate-100 text-slate-500 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider">
+                                            <i class="fas fa-minus"></i> No
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
+                                
+                                <td class="p-4 text-right whitespace-nowrap">
+                                    <button type="button" 
+                                            onclick="openReminderModal(<?php echo $r['id']; ?>, <?php echo $r['reminded_1w'] ? 'true' : 'false'; ?>, <?php echo $r['reminded_1d'] ? 'true' : 'false'; ?>, <?php echo $r['reminded_1h'] ? 'true' : 'false'; ?>)" 
+                                            class="inline-flex items-center justify-center w-8 h-8 rounded-xl bg-indigo-50 text-indigo-500 hover:bg-indigo-100 transition mr-2" title="Monitor Reminders">
+                                        <i class="fas fa-chart-line text-xs"></i>
+                                    </button>
+                                    
                                     <form method="POST" action="emails.php" class="send-email-form inline">
                                         <input type="hidden" name="action" value="send_emails">
                                         <input type="hidden" name="registrant_id" value="<?php echo $r['id']; ?>">
@@ -367,6 +416,7 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
     </form>
 
     <form id="bulk-delete-form" method="POST" action="registrants.php" class="hidden">
+        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
         <input type="hidden" name="action" value="delete_bulk">
         <input type="hidden" name="bulk_ids" id="bulk-delete-ids">
     </form>
@@ -398,6 +448,67 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
         </div>
     </div>
 
+    <!-- Reminder Monitoring Modal -->
+    <div id="reminderModal" class="fixed inset-0 z-[100] hidden">
+        <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-300" onclick="closeReminderModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4 pointer-events-none">
+            <div class="bg-white rounded-[2.5rem] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 pointer-events-auto">
+                <div class="p-8">
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-xl">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <h3 class="text-xl font-black text-slate-900 tracking-tight">Reminders</h3>
+                        </div>
+                        <button type="button" onclick="closeReminderModal()" class="w-8 h-8 rounded-full bg-slate-50 text-slate-400 hover:text-slate-600 flex items-center justify-center transition-colors">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <!-- 1 Week -->
+                        <div class="flex items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                            <div class="flex items-center gap-3">
+                                <i class="far fa-calendar-alt text-slate-400"></i>
+                                <span class="text-sm font-bold text-slate-700">1 Week Before</span>
+                            </div>
+                            <div id="remStatus1w"></div>
+                        </div>
+                        
+                        <!-- 1 Day -->
+                        <div class="flex items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                            <div class="flex items-center gap-3">
+                                <i class="fas fa-sun text-slate-400"></i>
+                                <span class="text-sm font-bold text-slate-700">1 Day Before</span>
+                            </div>
+                            <div id="remStatus1d"></div>
+                        </div>
+                        
+                        <!-- 1 Hour -->
+                        <div class="flex items-center justify-between p-4 rounded-2xl bg-slate-50 border border-slate-100">
+                            <div class="flex items-center gap-3">
+                                <i class="far fa-clock text-slate-400"></i>
+                                <span class="text-sm font-bold text-slate-700">1 Hour Before</span>
+                            </div>
+                            <div id="remStatus1h"></div>
+                        </div>
+                        
+                    </div>
+                    
+                    <div class="flex flex-col gap-3 mt-6">
+                        <button type="button" id="forceRunCronBtn" onclick="forceRunCronJobs()" class="w-full py-3.5 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold rounded-xl transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2">
+                            <i class="fas fa-sync-alt"></i> Force Run Reminders
+                        </button>
+                        <button type="button" onclick="closeReminderModal()" class="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-all shadow-lg shadow-slate-200">
+                            Done
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         const tableSearch = document.getElementById('table-search');
         const filterCategory = document.getElementById('filter-category');
@@ -408,33 +519,42 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
         const bulkToolbar = document.getElementById('bulk-toolbar');
         const selectedCount = document.getElementById('selected-count');
 
-        window.filterStatus = (status) => {
-            statusInput.value = status;
-            statusInput.form.submit();
-        };
+        // Guard against null elements
+        if (!bulkToolbar || !selectedCount) {
+            console.log('Bulk toolbar elements not found, skipping selection logic');
+        } else {
+            window.filterStatus = (status) => {
+                statusInput.value = status;
+                statusInput.form.submit();
+            };
 
-        window.resetFilters = () => {
-            window.location.href = 'registrants.php';
-        };
+            window.resetFilters = () => {
+                window.location.href = 'registrants.php';
+            };
 
-        // Selection Logic
-        function updateBulkToolbar() {
-            const selected = Array.from(rowCheckboxes).filter(cb => cb.checked).length;
-            selectedCount.textContent = selected;
-            bulkToolbar.classList.toggle('hidden', selected === 0);
+            // Selection Logic
+            function updateBulkToolbar() {
+                const selected = Array.from(rowCheckboxes).filter(cb => cb.checked).length;
+                selectedCount.textContent = selected;
+                bulkToolbar.classList.toggle('hidden', selected === 0);
+            }
+
+            if (selectAll) {
+                selectAll.addEventListener('change', () => {
+                    const isChecked = selectAll.checked;
+                    rowCheckboxes.forEach(cb => {
+                        cb.checked = isChecked;
+                    });
+                    updateBulkToolbar();
+                });
+            }
+
+            if (rowCheckboxes) {
+                rowCheckboxes.forEach(cb => {
+                    cb.addEventListener('change', updateBulkToolbar);
+                });
+            }
         }
-
-        selectAll.addEventListener('change', () => {
-            const isChecked = selectAll.checked;
-            rowCheckboxes.forEach(cb => {
-                cb.checked = isChecked;
-            });
-            updateBulkToolbar();
-        });
-
-        rowCheckboxes.forEach(cb => {
-            cb.addEventListener('change', updateBulkToolbar);
-        });
 
         // --- Single Send Logic with Modal & Cooldown ---
         const sendModal = document.getElementById('sendEmailModal');
@@ -505,9 +625,71 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
         setInterval(checkCooldowns, 1000);
         window.addEventListener('DOMContentLoaded', checkCooldowns);
 
+        let currentReminderId = null;
+
+        // Reminder Modal Logic
+        window.openReminderModal = (id, w1, d1, h1) => {
+            currentReminderId = id;
+            const modal = document.getElementById('reminderModal');
+            
+            const sentHtml = `<span class="inline-flex items-center gap-1.5 bg-emerald-100/50 text-emerald-600 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider"><i class="fas fa-check-circle"></i> Sent</span>`;
+            const pendingHtml = `<span class="inline-flex items-center gap-1.5 bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider"><i class="fas fa-clock"></i> Pending</span>`;
+            
+            document.getElementById('remStatus1w').innerHTML = w1 ? sentHtml : pendingHtml;
+            document.getElementById('remStatus1d').innerHTML = d1 ? sentHtml : pendingHtml;
+            document.getElementById('remStatus1h').innerHTML = h1 ? sentHtml : pendingHtml;
+            
+            modal.classList.remove('hidden');
+        };
+
+        window.closeReminderModal = () => {
+            document.getElementById('reminderModal').classList.add('hidden');
+        };
+
+        window.forceRunCronJobs = async () => {
+            if (!currentReminderId) return;
+            const btn = document.getElementById('forceRunCronBtn');
+            const originalContent = btn.innerHTML;
+            btn.innerHTML = `<i class="fas fa-circle-notch loading-spinner"></i> Processing...`;
+            btn.disabled = true;
+            btn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            try {
+                const response = await fetch(`cron_reminders.php?token=manual_trigger_492&force_id=${currentReminderId}`);
+                const text = await response.text();
+                
+                if (window.DynamicIsland) {
+                    DynamicIsland.notify({
+                        type: 'success',
+                        title: 'Reminders Executed',
+                        message: 'The reminder job was successfully triggered manually.'
+                    });
+                }
+                
+                // Refresh page after a short delay to reflect any new "Sent" statuses
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } catch (error) {
+                if (window.DynamicIsland) {
+                    DynamicIsland.notify({
+                        type: 'error',
+                        title: 'Execution Failed',
+                        message: 'Could not trigger the reminder job manually.'
+                    });
+                }
+                btn.innerHTML = originalContent;
+                btn.disabled = false;
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        };
+
         // Close on Esc
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') closeSendModal();
+            if (e.key === 'Escape') {
+                closeSendModal();
+                closeReminderModal();
+            }
         });
 
         // Initialize Dynamic Island for Flash Messages
@@ -542,6 +724,72 @@ $webinars = $pdo->query("SELECT DISTINCT title FROM webinar_tbl ORDER BY title A
                 window.print();
             }
         };
+
+        // Real-Time Auto Refresh (AJAX Polling every 20s)
+        setInterval(() => {
+            // First check if elements exist
+            const emailModalEl = document.getElementById('emailModal');
+            const reminderModalEl = document.getElementById('reminderModal');
+            
+            // Check if user is interacting with checkboxes. If yes, skip refresh to prevent losing selection.
+            const hasChecked = document.querySelectorAll('.row-select:checked').length > 0;
+            const isModalOpen = (emailModalEl && !emailModalEl.classList.contains('hidden')) || 
+                            (reminderModalEl && !reminderModalEl.classList.contains('hidden'));
+            
+            if (hasChecked || isModalOpen) return;
+
+            fetch(window.location.href)
+                .then(res => res.text())
+                .then(html => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    
+                    const newContainer = doc.getElementById('registrants-container');
+                    const oldContainer = document.getElementById('registrants-container');
+                    
+                    if (newContainer && oldContainer) {
+                        oldContainer.innerHTML = newContainer.innerHTML;
+                        // Re-attach event listeners for checkboxes
+                        attachCheckboxListeners();
+                    }
+                })
+                .catch(err => console.error("Auto-refresh failed", err));
+        }, 20000);
+
+        function attachCheckboxListeners() {
+            const selectAll = document.getElementById('select-all');
+            const rowCheckboxes = document.querySelectorAll('.row-select');
+            const bulkToolbar = document.getElementById('bulk-toolbar');
+            const selectedCountSpan = document.getElementById('selected-count');
+
+            if(selectAll) {
+                selectAll.addEventListener('change', (e) => {
+                    rowCheckboxes.forEach(cb => cb.checked = e.target.checked);
+                    updateToolbar();
+                });
+            }
+
+            rowCheckboxes.forEach(cb => {
+                cb.addEventListener('change', () => {
+                    updateToolbar();
+                    if(selectAll) selectAll.checked = Array.from(rowCheckboxes).every(c => c.checked);
+                });
+            });
+
+            function updateToolbar() {
+                const count = Array.from(rowCheckboxes).filter(cb => cb.checked).length;
+                if(selectedCountSpan) selectedCountSpan.textContent = count;
+                if(bulkToolbar) {
+                    if (count > 0) {
+                        bulkToolbar.classList.remove('hidden');
+                        bulkToolbar.classList.add('flex');
+                    } else {
+                        bulkToolbar.classList.add('hidden');
+                        bulkToolbar.classList.remove('flex');
+                    }
+                }
+            }
+        }
     </script>
 </body>
 </html>

@@ -8,6 +8,20 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     exit;
 }
 
+// CSRF Protection
+if (!isset($_SESSION['csrf']) || !isset($_SESSION['csrf']['value']) || time() >= (int)($_SESSION['csrf']['expires'] ?? 0)) {
+    $_SESSION['csrf'] = [
+        'value' => bin2hex(random_bytes(32)),
+        'expires' => time() + 900
+    ];
+}
+
+function validate_csrf_notif($token) {
+    if (!isset($_SESSION['csrf']['value']) || !isset($_SESSION['csrf']['expires'])) return false;
+    if (time() >= (int)$_SESSION['csrf']['expires']) return false;
+    return hash_equals($_SESSION['csrf']['value'], (string)$token);
+}
+
 $success = $_GET['success'] ?? '';
 
 try {
@@ -16,6 +30,12 @@ try {
 
 // Handle Actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $csrf = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_notif($csrf)) {
+        header('Location: admin_notifications_list.php?error=Security+check+failed');
+        exit;
+    }
+    
     $action = $_POST['action'] ?? '';
     if ($action === 'mark_all_read') {
         $pdo->exec("UPDATE admin_notifications SET is_read = 1 WHERE type = 'registrants'");
@@ -122,7 +142,7 @@ function time_elapsed_string($datetime, $full = false) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Notifications · Mioym Admin</title>
+    <title>Notifications 路 Mioym Admin</title>
     <link rel="icon" type="image/png" href="img/logo.png">
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -165,6 +185,7 @@ function time_elapsed_string($datetime, $full = false) {
 
                         <div class="flex items-center gap-2">
                             <form method="POST" class="inline">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                                 <input type="hidden" name="action" value="mark_all_read">
                                 <button type="submit" class="text-[11px] font-black uppercase tracking-widest text-slate-400 hover:text-blue-600 transition-colors flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-blue-50">
                                     <i class="fas fa-check-double"></i> Mark all read
@@ -177,6 +198,7 @@ function time_elapsed_string($datetime, $full = false) {
                             </div>
 
                             <form id="bulkDeleteForm" method="POST" class="inline" onsubmit="return confirm('Delete selected notifications?');">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                                 <input type="hidden" name="action" value="delete_selected">
                                 <button id="bulkDeleteBtn" type="submit" disabled class="text-[11px] font-black uppercase tracking-widest text-slate-300 transition-colors flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 disabled:opacity-60 disabled:cursor-not-allowed hover:bg-rose-50 hover:text-rose-600">
                                     <i class="far fa-trash-alt"></i> Delete selected
@@ -210,7 +232,7 @@ function time_elapsed_string($datetime, $full = false) {
             <!-- Notification Stream -->
             <div class="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-10">
                 <div class="w-full max-w-[1600px] mx-auto">
-                    <div class="space-y-2">
+                    <div id="notifications-container" class="space-y-2">
                         <?php if (empty($notifications)): ?>
                         <div class="py-20 text-center">
                             <div class="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -258,6 +280,7 @@ function time_elapsed_string($datetime, $full = false) {
                                         <div class="quick-actions opacity-0 translate-x-4 transition-all duration-300 flex items-center gap-1">
                                             <?php if(!$n['is_read']): ?>
                                             <form method="POST" class="inline">
+                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                                                 <input type="hidden" name="id" value="<?php echo $n['id']; ?>">
                                                 <input type="hidden" name="action" value="mark_read">
                                                 <button type="submit" class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all" title="Mark as read">
@@ -271,6 +294,7 @@ function time_elapsed_string($datetime, $full = false) {
                                             </a>
 
                                             <form method="POST" class="inline" onsubmit="return confirm('Delete this notification?');">
+                                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                                                 <input type="hidden" name="id" value="<?php echo $n['id']; ?>">
                                                 <input type="hidden" name="action" value="delete">
                                                 <button type="submit" class="w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-all" title="Delete">
@@ -310,24 +334,53 @@ function time_elapsed_string($datetime, $full = false) {
                 DynamicIsland.success("<?php echo addslashes($success); ?>");
             }
 
-            const selectAll = document.getElementById('selectAllNotifications');
-            const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
-            const checkboxes = Array.from(document.querySelectorAll('.notif-checkbox'));
+            function attachListeners() {
+                const selectAll = document.getElementById('selectAllNotifications');
+                const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+                const checkboxes = Array.from(document.querySelectorAll('.notif-checkbox'));
 
-            function updateBulkState() {
-                const selectedCount = checkboxes.filter(cb => cb.checked).length;
-                if (bulkDeleteBtn) bulkDeleteBtn.disabled = selectedCount === 0;
-                if (selectAll) selectAll.checked = selectedCount > 0 && selectedCount === checkboxes.length;
-            }
+                function updateBulkState() {
+                    const selectedCount = checkboxes.filter(cb => cb.checked).length;
+                    if (bulkDeleteBtn) bulkDeleteBtn.disabled = selectedCount === 0;
+                    if (selectAll) selectAll.checked = selectedCount > 0 && selectedCount === checkboxes.length;
+                }
 
-            selectAll?.addEventListener('change', () => {
-                const checked = !!selectAll.checked;
-                checkboxes.forEach(cb => { cb.checked = checked; });
+                if (selectAll) {
+                    selectAll.addEventListener('change', () => {
+                        const checked = !!selectAll.checked;
+                        checkboxes.forEach(cb => { cb.checked = checked; });
+                        updateBulkState();
+                    });
+                }
+
+                checkboxes.forEach(cb => cb.addEventListener('change', updateBulkState));
                 updateBulkState();
-            });
+            }
+            
+            attachListeners();
 
-            checkboxes.forEach(cb => cb.addEventListener('change', updateBulkState));
-            updateBulkState();
+            // Real-Time Notification Updates (AJAX Polling every 20s)
+            setInterval(() => {
+                // Skip refresh if user has checked boxes
+                const hasChecked = document.querySelectorAll('.notif-checkbox:checked').length > 0;
+                if (hasChecked) return;
+
+                fetch(window.location.href)
+                    .then(res => res.text())
+                    .then(html => {
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, 'text/html');
+                        
+                        const newContainer = doc.getElementById('notifications-container');
+                        const oldContainer = document.getElementById('notifications-container');
+                        
+                        if (newContainer && oldContainer) {
+                            oldContainer.innerHTML = newContainer.innerHTML;
+                            attachListeners(); // re-attach checkbox events
+                        }
+                    })
+                    .catch(err => console.error("Auto-refresh failed", err));
+            }, 20000);
         });
     </script>
 </body>

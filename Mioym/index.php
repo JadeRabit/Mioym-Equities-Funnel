@@ -27,6 +27,33 @@ function validate_csrf($t) {
     return hash_equals($_SESSION['csrf']['value'], (string)$t);
 }
 
+function build_teams_registration_link($webinarLink, $fullName, $email) {
+    // Teams registration pages can add extra steps and may ignore prefill params.
+    // Keep the URL clean to avoid exposing email/name in query strings.
+    $webinarLink = trim((string)$webinarLink);
+    return ($webinarLink === '' || $webinarLink === '#') ? '#' : $webinarLink;
+}
+
+function ensure_registrants_columns(PDO $pdo) {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    $requiredColumns = [
+        'liquid_50000' => "ALTER TABLE registrants_tbl ADD COLUMN liquid_50000 VARCHAR(10) NULL AFTER is_accredited",
+        'deploy_timeline' => "ALTER TABLE registrants_tbl ADD COLUMN deploy_timeline VARCHAR(100) NULL AFTER liquid_50000",
+    ];
+
+    foreach ($requiredColumns as $columnName => $alterSql) {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM registrants_tbl LIKE ?");
+        $stmt->execute([$columnName]);
+        $exists = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$exists) {
+            $pdo->exec($alterSql);
+        }
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register_submit'])) {
     $csrf = $_POST['csrf_token'] ?? '';
     if (!validate_csrf($csrf)) {
@@ -36,143 +63,201 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['register_submit'])) {
         $fullname = trim($_POST['fullname'] ?? '');
         $email = trim($_POST['email'] ?? '');
         $phone = trim($_POST['phone'] ?? '');
+        $phone_raw = $phone;
         $phone = preg_replace('/\D+/', '', (string)$phone);
         $phone = substr($phone, 0, 25);
         $country_code = '';
+        
+        // US Phone Validation - Strict: requires +1 country code + valid US format
+        $phone_valid = false;
+        $phone_formatted = '';
+        if (strlen($phone) >= 10) {
+            // Must have +1 or 1 country code (US)
+            if (strpos($phone, '1') === 0 && strlen($phone) >= 10) {
+                $phone_digits = substr($phone, 1); // Strip leading 1
+                // Must be exactly 10 digits + start with 2-9 (valid US area code)
+                if (strlen($phone_digits) === 10 && preg_match('/^[2-9]\d{9}$/', $phone_digits)) {
+                    $phone_valid = true;
+                    $area_code = substr($phone_digits, 0, 3);
+                    $exchange = substr($phone_digits, 3, 3);
+                    $subscriber = substr($phone_digits, 6, 4);
+                    $phone_formatted = '+1 (' . $area_code . ') ' . $exchange . '-' . $subscriber;
+                }
+            }
+        }
+        
         $is_accredited = isset($_POST['is_accredited']) ? 1 : 0;
+        $liquid_50000 = trim((string)($_POST['liquid_50000'] ?? ''));
+        $deploy_timeline = $_POST['deploy_timeline'] ?? [];
+        if (!is_array($deploy_timeline)) {
+            $deploy_timeline = [$deploy_timeline];
+        }
+        $deploy_timeline = implode(', ', array_filter(array_map('trim', $deploy_timeline)));
         
         if ($fullname === '' || $email === '' || $phone === '') {
+            record_registration_attempt($pdo, $email);
             $regError = "Please fill in Name, Email and Phone Number.";
+        } elseif (!$phone_valid) {
+            record_registration_attempt($pdo, $email);
+            $regError = "Please enter a valid US phone number.";
+        } elseif (!isset($_POST['is_accredited'])) {
+            record_registration_attempt($pdo, $email);
+            $regError = "Please confirm your investor status.";
         } elseif ($recaptcha_secret_key === '') {
+            record_registration_attempt($pdo, $email);
             $regError = 'Captcha is not configured. Please contact support.';
         } elseif ($recaptcha_response === '') {
+            record_registration_attempt($pdo, $email);
             $regError = 'Please complete the captcha.';
         } else {
-            $captcha_ok = false;
-            try {
-                $payload = http_build_query([
-                    'secret' => $recaptcha_secret_key,
-                    'response' => $recaptcha_response,
-                    'remoteip' => $_SERVER['REMOTE_ADDR'] ?? ''
-                ]);
-                $resp = '';
-                if (function_exists('curl_init')) {
-                    $ch = curl_init('https://www.google.com/recaptcha/api/siteverify');
-                    curl_setopt($ch, CURLOPT_POST, true);
-                    curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
-                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-                    curl_setopt($ch, CURLOPT_TIMEOUT, 8);
-                    $resp = (string)curl_exec($ch);
-                    curl_close($ch);
-                } else {
-                    $ctx = stream_context_create([
-                        'http' => [
-                            'method' => 'POST',
-                            'header' => "Content-type: application/x-www-form-urlencoded\r\n",
-                            'content' => $payload,
-                            'timeout' => 8
-                        ]
-                    ]);
-                    $resp = (string)@file_get_contents('https://www.google.com/recaptcha/api/siteverify', false, $ctx);
-                }
-                $data = json_decode((string)$resp, true);
-                $captcha_ok = is_array($data) && !empty($data['success']);
-            } catch (Throwable $e) {
+            $rateLimitCheck = check_registration_rate_limit($pdo, $email);
+            if ($rateLimitCheck['blocked']) {
+                $minutes = ceil($rateLimitCheck['remaining_seconds'] / 60);
+                $regError = "Too many registration attempts. Please try again in " . $minutes . " minute(s).";
+            } else {
                 $captcha_ok = false;
-            }
-            if (!$captcha_ok) {
-                $regError = 'Captcha verification failed. Please try again.';
-            } else {
-            // Fetch the active webinar info
-            $activeWebinar = $pdo->query("SELECT webinar_id, title, webinar_link, `schedule_date&time`, duration FROM webinar_tbl WHERE is_published = 1 LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-            if (!$activeWebinar) {
-                $activeWebinar = $pdo->query("SELECT webinar_id, title, webinar_link, `schedule_date&time`, duration FROM webinar_tbl WHERE status IN ('active', 'upcoming') ORDER BY `schedule_date&time` ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
-            }
-            $webinar_id = $activeWebinar ? $activeWebinar['webinar_id'] : null;
-            $webinar_title = $activeWebinar ? $activeWebinar['title'] : 'General Webinar';
-            $webinar_link = $activeWebinar ? $activeWebinar['webinar_link'] : '#';
-            $webinar_duration = $activeWebinar ? $activeWebinar['duration'] : get_setting('webinar_duration', '60-minute');
-
-            // Check registration limit (20 participants) for this specific webinar
-            $currentCount = 0;
-            if ($webinar_id) {
                 try {
-                    $stmtCount = $pdo->prepare("SELECT COUNT(*) FROM registrants_tbl WHERE webinar_id = ?");
-                    $stmtCount->execute([$webinar_id]);
-                    $currentCount = $stmtCount->fetchColumn();
-                } catch (Exception $e) { }
-            }
-
-            if ($currentCount >= 20) {
-                $regError = 'Maximum capacity reached for this session. We have reached our limit of 20 participants. Please check back later for future dates.';
-            } else {
-                // Calculate schedule string and CTA URL for email
-                $emailScheduleStr = 'TBD';
-            $ctaUrl = $webinar_link; 
-            $isUpcoming = false;
-
-            if ($activeWebinar && !empty($activeWebinar['schedule_date&time'])) {
-                try {
-                    $base = $activeWebinar['schedule_date&time'];
-                    $eventTime = new DateTime($base, new DateTimeZone('Europe/London'));
-                    $now = new DateTime('now', new DateTimeZone('Europe/London'));
-                    $isUpcoming = ($now < $eventTime);
-
-                    $ldn = new DateTime($base, new DateTimeZone('Europe/London'));
-                    $ny = clone $ldn;
-                    $ny->setTimezone(new DateTimeZone('America/New_York'));
-                    $dateTitle = $ldn->format('l j F');
-                    $timeL = strtolower($ldn->format('ga')) . ' ' . $ldn->format('T');
-                    $timeN = strtolower($ny->format('ga')) . ' ' . $ny->format('T');
-                    $emailScheduleStr = $dateTitle . ' · ' . $timeL . ' / ' . $timeN;
-
-                    if ($isUpcoming) {
-                        $title = urlencode($webinar_title);
-                        $utcTime = clone $ldn;
-                        $utcTime->setTimezone(new DateTimeZone('UTC'));
-                        $startTime = $utcTime->format('Ymd\THis\Z');
-                        $endTime = clone $utcTime;
-                        $endTime->modify('+1 hour');
-                        $endTimeStr = $endTime->format('Ymd\THis\Z');
-                        $detailsText = "Join our webinar: " . $webinar_title . "\nSchedule: " . $emailScheduleStr . "\n\nNote: This calendar event is automatically adjusted to your local timezone.\n\nLearn about our " . get_setting('annual_return', '15%') . " return strategy.";
-                        $details = urlencode($detailsText);
-                        $ctaUrl = "https://www.google.com/calendar/render?action=TEMPLATE&text={$title}&dates={$startTime}/{$endTimeStr}&details={$details}&location=" . urlencode($webinar_link) . "&ctz=Europe/London";
+                    $payload = http_build_query([
+                        'secret' => $recaptcha_secret_key,
+                        'response' => $recaptcha_response,
+                        'remoteip' => $_SERVER['REMOTE_ADDR'] ?? ''
+                    ]);
+                    $resp = '';
+                    if (function_exists('curl_init')) {
+                        $ch = curl_init('https://www.google.com/recaptcha/api/siteverify');
+                        curl_setopt($ch, CURLOPT_POST, true);
+                        curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+                        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+                        curl_setopt($ch, CURLOPT_TIMEOUT, 8);
+                        $resp = (string)curl_exec($ch);
+                        curl_close($ch);
+                    } else {
+                        $ctx = stream_context_create([
+                            'http' => [
+                                'method' => 'POST',
+                                'header' => "Content-type: application/x-www-form-urlencoded\r\n",
+                                'content' => $payload,
+                                'timeout' => 8
+                            ]
+                        ]);
+                        $resp = (string)@file_get_contents('https://www.google.com/recaptcha/api/siteverify', false, $ctx);
                     }
-                } catch (Exception $e) { }
-            }
+                    $data = json_decode((string)$resp, true);
+                    $captcha_ok = is_array($data) && !empty($data['success']);
+                } catch (Throwable $e) {
+                    $captcha_ok = false;
+                }
+                if (!$captcha_ok) {
+                    record_registration_attempt($pdo, $email);
+                    $regError = 'Captcha verification failed. Please try again.';
+                } else {
+                    $activeWebinar = $pdo->query("SELECT webinar_id, title, description, host_description, hostname, webinar_link, `schedule_date&time`, duration FROM webinar_tbl WHERE is_published = 1 LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+                    if (!$activeWebinar) {
+                        $activeWebinar = $pdo->query("SELECT webinar_id, title, description, host_description, hostname, webinar_link, `schedule_date&time`, duration FROM webinar_tbl WHERE status IN ('active', 'upcoming') ORDER BY `schedule_date&time` ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+                    }
+                    $webinar_id = $activeWebinar ? $activeWebinar['webinar_id'] : null;
+                    $webinar_title = $activeWebinar ? $activeWebinar['title'] : 'General Webinar';
+                    $webinar_description = $activeWebinar ? (string)($activeWebinar['description'] ?? '') : '';
+                    $webinar_host_name = $activeWebinar ? (string)($activeWebinar['hostname'] ?? '') : '';
+                    $webinar_host_description = $activeWebinar ? (string)($activeWebinar['host_description'] ?? '') : '';
+                    $webinar_link = $activeWebinar ? $activeWebinar['webinar_link'] : '#';
+                    $webinar_duration = $activeWebinar ? $activeWebinar['duration'] : get_setting('webinar_duration', '60-minute');
 
-            $stmt = $pdo->prepare("INSERT INTO registrants_tbl (fullname, email, phone, country_code, is_accredited, webinar_id, registration_date) VALUES (?, ?, ?, ?, ?, ?, NOW())");
-            $stmt->execute([$fullname, $email, $phone, $country_code, $is_accredited, $webinar_id]);
+                    $currentCount = 0;
+                    if ($webinar_id) {
+                        try {
+                            $stmtCount = $pdo->prepare("SELECT COUNT(*) FROM registrants_tbl WHERE webinar_id = ?");
+                            $stmtCount->execute([$webinar_id]);
+                            $currentCount = $stmtCount->fetchColumn();
+                        } catch (Exception $e) { }
+                    }
 
-            if (function_exists('send_dual_registration_emails')) {
-                send_dual_registration_emails($pdo, [
-                    'fullname' => $fullname,
-                    'email' => $email,
-                    'is_accredited' => $is_accredited ? 'Yes' : 'No',
-                    'title' => $webinar_title,
-                    'schedule' => $emailScheduleStr,
-                    'webinar_link' => $webinar_link,
-                    'cta_url' => $ctaUrl,
-                    'is_upcoming' => $isUpcoming,
-                    'duration' => $webinar_duration
-                ]);
-            }
+                    $emailScheduleStr = 'TBD';
+                    $ctaUrl = $webinar_link;
+                    $isUpcoming = false;
 
-            if (function_exists('admin_notify')) {
-                $acc_label = $is_accredited ? ' (Accredited)' : '';
-                $msg = $fullname . $acc_label . ' registered' . ($email ? ' (' . $email . ')' : '') . '.';
-                admin_notify($pdo, 'registrants', 'New Registration', $msg, 'registrants.php?search=' . urlencode($email ?: $fullname));
+                    if ($activeWebinar && !empty($activeWebinar['schedule_date&time'])) {
+                        try {
+                            $base = $activeWebinar['schedule_date&time'];
+                            $tzString = $activeWebinar['timezone'] ?? 'America/New_York';
+                            
+                            try {
+                                $eventTime = new DateTime($base, new DateTimeZone($tzString));
+                                $now = new DateTime('now', new DateTimeZone($tzString));
+                            } catch (Exception $e) {
+                                $eventTime = new DateTime($base, new DateTimeZone('America/New_York'));
+                                $now = new DateTime('now', new DateTimeZone('America/New_York'));
+                                $tzString = 'America/New_York';
+                            }
+                            
+                            $isUpcoming = ($now < $eventTime);
+
+                            $dateTitle = $eventTime->format('l j F');
+                            $timeStr = strtolower($eventTime->format('g:i a'));
+                            $emailScheduleStr = $dateTitle . ' · ' . $timeStr;
+
+                            if ($isUpcoming) {
+                                $title = urlencode($webinar_title);
+                                $utcTime = clone $eventTime;
+                                $utcTime->setTimezone(new DateTimeZone('UTC'));
+                                $startTime = $utcTime->format('Ymd\THis\Z');
+                                $endTime = clone $utcTime;
+                                $endTime->modify('+1 hour');
+                                $endTimeStr = $endTime->format('Ymd\THis\Z');
+                                $detailsText = "Join our webinar: " . $webinar_title . "\nSchedule: " . $emailScheduleStr . "\n\nNote: This calendar event is automatically adjusted to your local timezone.\n\nLearn about our " . get_setting('annual_return', '15%') . " return strategy.";
+                                $details = urlencode($detailsText);
+                                $ctaUrl = "https://www.google.com/calendar/render?action=TEMPLATE&text={$title}&dates={$startTime}/{$endTimeStr}&details={$details}&location=" . urlencode($webinar_link) . "&ctz={$tzString}";
+                            }
+                        } catch (Exception $e) { }
+                    }
+                    
+                    // Extra safeguard: ensure formatted phone is complete (+1 (XXX) XXX-XXXX = 14 chars)
+                    if ($phone_valid && strlen($phone_formatted) !== 14) {
+                        record_registration_attempt($pdo, $email);
+                        $regError = "Please enter a valid US phone number.";
+                        $phone_valid = false;
+                    }
+
+                    ensure_registrants_columns($pdo);
+                    $stmt = $pdo->prepare("INSERT INTO registrants_tbl (fullname, email, phone, country_code, is_accredited, liquid_50000, deploy_timeline, webinar_id, registration_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())");
+                    $stmt->execute([$fullname, $email, $phone_formatted, $country_code, $is_accredited, $liquid_50000 !== '' ? $liquid_50000 : null, $deploy_timeline !== '' ? $deploy_timeline : null, $webinar_id]);
+
+                    if (function_exists('send_dual_registration_emails')) {
+                        send_dual_registration_emails($pdo, [
+                            'fullname' => $fullname,
+                            'email' => $email,
+                            'is_accredited' => $is_accredited ? 'Yes' : 'No',
+                            'title' => $webinar_title,
+                            'webinar_id' => $webinar_id,
+                            'description' => $webinar_description,
+                            'host_name' => $webinar_host_name,
+                            'host_description' => $webinar_host_description,
+                            'schedule' => $emailScheduleStr,
+                            'webinar_link' => $webinar_link,
+                            'cta_url' => $ctaUrl,
+                            'is_upcoming' => $isUpcoming,
+                            'duration' => $webinar_duration
+                        ]);
+                    }
+
+                    if (function_exists('admin_notify')) {
+                        $msg = "Name: " . $fullname . "\n\n" .
+                              "Email: " . $email . "\n\n" .
+                              "Phone: " . $phone_formatted . "\n\n" .
+                              "Accredited: " . ($is_accredited ? 'Yes' : 'No') . "\n\n" .
+                              "Webinar: " . $webinar_title . "\n\n" .
+                              "Duration: " . $webinar_duration . "\n\n" .
+                              "Registration Time: " . date('Y-m-d h:i A');
+                        admin_notify($pdo, 'registrants', 'New Registration', $msg, 'registrants.php?search=' . urlencode($email ?: $fullname));
+                    }
+                    header("Location: thankyou.php?fullname=" . urlencode($fullname));
+                    exit;
+                }
             }
-            header("Location: thankyou.php?fullname=" . urlencode($fullname));
-            exit;
-        }
         }
     }
 }
-}
-
-// --- END REGISTRATION LOGIC ---
 
 $feedbackTableReady = true;
 try {
@@ -286,17 +371,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_submit'])) {
     $cSubject = trim((string)($_POST['c_subject'] ?? ''));
     $cMessage = trim((string)($_POST['c_message'] ?? ''));
 
-    if ($cName === '' || $cEmail === '' || $cMessage === '') {
+if ($cName === '' || $cEmail === '' || $cMessage === '') {
+        record_contact_attempt($pdo, $cEmail);
         $contactError = 'Please fill in your name, email, and message.';
     } elseif (!filter_var($cEmail, FILTER_VALIDATE_EMAIL)) {
+        record_contact_attempt($pdo, $cEmail);
         $contactError = 'Please enter a valid email address.';
     } elseif ($recaptcha_secret_key === '') {
+        record_contact_attempt($pdo, $cEmail);
         $contactError = 'Captcha is not configured. Please contact support.';
     } elseif ($recaptcha_response === '') {
+        record_contact_attempt($pdo, $cEmail);
         $contactError = 'Please complete the captcha.';
-    } elseif (!$contactTableReady) {
-        $contactError = 'Contact storage is not available right now.';
     } else {
+        $contactRateLimit = check_contact_rate_limit($pdo, $cEmail);
+        if ($contactRateLimit['blocked']) {
+            $minutes = ceil($contactRateLimit['remaining_seconds'] / 60);
+            $contactError = "Too many submissions. Please try again in " . $minutes . " minute(s).";
+        } else {
         $captcha_ok = false;
         try {
             $payload = http_build_query([
@@ -331,10 +423,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_submit'])) {
             $captcha_ok = false;
         }
         if (!$captcha_ok) {
+            record_contact_attempt($pdo, $cEmail);
             $contactError = 'Captcha verification failed. Please try again.';
         } else {
-        $stmt = $pdo->prepare("INSERT INTO contactus_tbl (name, email, subject, message) VALUES (?, ?, ?, ?)");
-        $stmt->execute([$cName, $cEmail, $cSubject !== '' ? $cSubject : null, $cMessage]);
+            $stmt = $pdo->prepare("INSERT INTO contactus_tbl (name, email, subject, message) VALUES (?, ?, ?, ?)");
+            $stmt->execute([$cName, $cEmail, $cSubject !== '' ? $cSubject : null, $cMessage]);
         
         if (function_exists('admin_notify')) {
             $title = $cSubject !== '' ? $cSubject : 'Contact request';
@@ -430,11 +523,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_submit'])) {
         $res = send_brevo_api_email($adminEmail, 'Admin', 'Contact Us: ' . $safeSubject, $body, $cEmail, $cName);
         
         if ($res['success']) {
-            header('Location: index.php?contact=success#contact');
-            exit;
-        } else {
-            $contactError = 'Message saved, but email sending failed. Please try again later.';
-        }
+                header('Location: index.php?contact=success#contact');
+                exit;
+            } else {
+                $contactError = 'Message saved, but email sending failed. Please try again later.';
+            }
+            }
         }
     }
 }
@@ -489,13 +583,16 @@ if ($rawSubItems !== '') {
             $size = (int)($it['size'] ?? 20);
             if ($size < 10) $size = 10;
             if ($size > 80) $size = 80;
+            $spacing = (int)($it['spacing'] ?? 8);
+            if ($spacing < 0) $spacing = 0;
+            if ($spacing > 64) $spacing = 64;
             $color = trim((string)($it['color'] ?? '#ffffff'));
             if (!preg_match('/^#?[0-9A-Fa-f]{3}([0-9A-Fa-f]{3})?$/', $color)) $color = '#ffffff';
             if ($color !== '' && $color[0] !== '#') $color = '#' . $color;
             $bold = !empty($it['bold']);
             $font = (string)($it['font'] ?? 'system_sans');
             if (!in_array($font, $allowedFonts, true)) $font = 'system_sans';
-            $webinarSubheadingItems[] = ['text' => $text, 'size' => $size, 'color' => $color, 'bold' => $bold, 'font' => $font];
+            $webinarSubheadingItems[] = ['text' => $text, 'size' => $size, 'spacing' => $spacing, 'color' => $color, 'bold' => $bold, 'font' => $font];
             if (count($webinarSubheadingItems) >= 12) break;
         }
     }
@@ -554,8 +651,18 @@ $webinarDescriptionLines = array_values(array_filter(array_map('trim', $webinarD
 $webinarDescriptionLead = $webinarDescriptionLines[0] ?? '';
 $webinarDescriptionBullets = array_slice($webinarDescriptionLines, 1);
 $scheduleDate = isset($latestWebinar['schedule_date&time']) 
-    ? date('d M Y · g:ia', strtotime($latestWebinar['schedule_date&time'])) 
-    : '24 Apr 2025 · 6pm BST';
+    ? date('F j, Y · g:i A', strtotime($latestWebinar['schedule_date&time'])) 
+    : 'April 24, 2025 · 6:00 PM';
+$countdownTargetMs = 0;
+if (!empty($latestWebinar['schedule_date&time'])) {
+    try {
+        // Force countdown reference to America/New_York (EST/EDT).
+        $countdownDate = new DateTime($latestWebinar['schedule_date&time'], new DateTimeZone('America/New_York'));
+        $countdownTargetMs = ((int)$countdownDate->format('U')) * 1000;
+    } catch (Exception $e) {
+        $countdownTargetMs = 0;
+    }
+}
 $heroBgUrl = (string)get_setting('hero_bg_url', 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/7a/View_of_Empire_State_Building_from_Rockefeller_Center_New_York_City_dllu_%28cropped%29.jpg/1920px-View_of_Empire_State_Building_from_Rockefeller_Center_New_York_City_dllu_%28cropped%29.jpg');
 $annualReturn = (string)get_setting('annual_return', '15%');
 $annualEsc = htmlspecialchars($annualReturn, ENT_QUOTES, 'UTF-8');
@@ -729,7 +836,7 @@ if ($feedbackTableReady) {
 
     <!-- ========== SECTION 4: MAIN CONTENT AREA ========== -->
     <div class=" w-full border-b border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.25)]">
-    <div class="max-w-[1700px] mx-auto px-4 sm:px-6">
+    <div class="max-w-[1300px] mx-auto px-4 sm:px-6">
         <!-- ========== SECTION 4.1: HEADER ========== -->
         <div class="flex flex-col sm:flex-row justify-between items-center py-4 sm:py-0 gap-4">
             <div class="flex items-center">
@@ -737,33 +844,32 @@ if ($feedbackTableReady) {
                     <img src="img/logo2.png" alt="Mioym Group" class="w-full h-full object-contain">
                 </div>
             </div>
-            <span class="inline-flex items-center gap-2 text-[10px] sm:text-xs md:text-sm bg-[#0f2b44] text-white border border-white/15 px-3 py-1.5 sm:px-4 sm:py-2 rounded-full shadow-sm backdrop-blur mb-4 sm:mb-0">
-                <i class="far fa-calendar-alt text-amber-300"></i> <?php echo htmlspecialchars($scheduleDate); ?>
+            <span id="header-schedule" class="inline-flex items-center gap-2 text-base sm:text-xl md:text-2xl font-black text-[#0f2b44] mb-4 sm:mb-0">
+                 <?php echo htmlspecialchars($scheduleDate); ?>
             </span>
         </div>
     </div>
     </div>
 
         <!-- ========== SECTION 4.2: HERO SECTION ========== -->
-    <section class="hero-section group relative isolate overflow-hidden bg-slate-950 bg-cover bg-center bg-no-repeat" style="background-image: url('<?php echo htmlspecialchars($heroBgUrl, ENT_QUOTES, 'UTF-8'); ?>');">
+    <section id="hero-section" class="hero-section group relative isolate overflow-hidden bg-slate-950 bg-cover bg-center bg-no-repeat" style="background-image: url('<?php echo htmlspecialchars($heroBgUrl, ENT_QUOTES, 'UTF-8'); ?>');">
         <div class="absolute inset-0 bg-gradient-to-b from-slate-950/80 to-slate-900/95 backdrop-blur-[2px]"></div>
         <div class="pointer-events-none absolute -top-32 -left-32 h-80 w-80 rounded-full bg-amber-500/10 blur-3xl"></div>
         <div class="pointer-events-none absolute -bottom-40 -right-40 h-[28rem] w-[28rem] rounded-full bg-blue-500/10 blur-3xl"></div>
 
-        <div class="hero-content relative z-10 max-w-[1700px] mx-auto px-3 sm:px-4 lg:px-6 py-10 md:py-20">
+        <div class="hero-content relative z-10 max-w-[1300px] mx-auto px-3 sm:px-4 lg:px-6 py-10 md:py-20">
             <div class="w-full lg:max-w-[100%]">
                 <div class="inline-flex text-[10px] sm:text-xs font-extrabold uppercase tracking-[0.2em] text-yellow-500">
                     ACCREDITED INVESTORS ONLY
                 </div>
 
                 <h1 class="mt-4 font-black tracking-[-0.03em] text-white leading-[1.02] break-words transition-transform duration-200 group-hover:-translate-y-0.5">
-                    <span class="block text-justify text-[clamp(2rem,4.8vw,5rem)] drop-shadow-[0_10px_30px_rgba(0,0,0,0.35)]"><?php echo nl2br(htmlspecialchars($webinarTitle, ENT_QUOTES, 'UTF-8')); ?></span>
+                    <span class="block text-[clamp(2rem,4.8vw,5rem)] drop-shadow-[0_10px_30px_rgba(0,0,0,0.35)]"><?php echo nl2br(htmlspecialchars($webinarTitle, ENT_QUOTES, 'UTF-8')); ?></span>
                 </h1>
-
                 <?php if (!empty($webinarSubheadingItems)): ?>
                     <div class="mt-6 max-w-4xl space-y-2">
                         <?php foreach ($webinarSubheadingItems as $it): ?>
-                            <p class="leading-relaxed" style="font-size: clamp(14px, 3vw, <?php echo (int)($it['size'] ?? 20); ?>px); font-weight: <?php echo !empty($it['bold']) ? 800 : 600; ?>; color: <?php echo htmlspecialchars((string)($it['color'] ?? '#cbd5e1')); ?>; font-family: <?php echo htmlspecialchars(landing_subheading_font_stack((string)($it['font'] ?? 'system_sans'))); ?>;">
+                            <p class="leading-relaxed" style="font-size: clamp(14px, 3vw, <?php echo (int)($it['size'] ?? 20); ?>px); margin-bottom: <?php echo (int)($it['spacing'] ?? 8); ?>px; font-weight: <?php echo !empty($it['bold']) ? 800 : 600; ?>; color: <?php echo htmlspecialchars((string)($it['color'] ?? '#cbd5e1')); ?>; font-family: <?php echo htmlspecialchars(landing_subheading_font_stack((string)($it['font'] ?? 'system_sans'))); ?>;">
                                 <?php echo htmlspecialchars((string)($it['text'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
                             </p>
                         <?php endforeach; ?>
@@ -791,17 +897,30 @@ if ($feedbackTableReady) {
                         <?php
                             $aboutLines = [];
                             if ($webinarDescriptionRaw !== '') {
-                                $aboutLines = $webinarDescriptionLines;
+                                $chunks = preg_split("/\r\n|\r|\n/", (string)$webinarDescriptionRaw);
+                                $buffer = '';
+                                foreach ((array)$chunks as $lineRaw) {
+                                    $line = trim((string)$lineRaw);
+                                    if ($line === '') {
+                                        if ($buffer !== '') {
+                                            $aboutLines[] = trim($buffer);
+                                            $buffer = '';
+                                        }
+                                        continue;
+                                    }
+                                    $line = ltrim($line, "•- \t");
+                                    $buffer = $buffer === '' ? $line : ($buffer . ' ' . $line);
+                                }
+                                if ($buffer !== '') $aboutLines[] = trim($buffer);
                             } elseif (!empty($webinarDescriptionBullets)) {
-                                $aboutLines = $webinarDescriptionBullets;
+                                $aboutLines = array_values(array_filter(array_map(static fn($l) => ltrim((string)$l, "•- \t"), $webinarDescriptionBullets), static fn($l) => $l !== ''));
                             }
-                            $aboutLines = array_values(array_filter(array_map(static fn($l) => ltrim((string)$l, "•- \t"), $aboutLines), static fn($l) => $l !== ''));
                             $aboutLead = $aboutLines[0] ?? '';
                             $aboutMore = array_slice($aboutLines, 1);
                         ?>
                         <?php if ($aboutLead !== ''): ?>
-                            <ul class="mt-4 space-y-2 text-slate-200 text-sm leading-relaxed">
-                                <li>
+                            <ul class="mt-4 space-y-3 text-slate-100 text-base sm:text-lg leading-relaxed font-semibold list-disc pl-6">
+                                <li class="font-bold">
                                     <?php echo str_replace($annualEsc, '<span class="text-amber-300 font-bold">' . $annualEsc . '</span>', htmlspecialchars($aboutLead, ENT_QUOTES, 'UTF-8')); ?>
                                     <?php if (!empty($aboutMore)): ?>
                                         <button type="button" data-model-expand aria-expanded="false" class="ml-2 text-amber-300 underline underline-offset-4 font-bold hover:text-amber-200 hover:drop-shadow-[0_0_10px_rgba(245,158,11,0.7)] transition-colors duration-200 whitespace-nowrap">
@@ -810,7 +929,7 @@ if ($feedbackTableReady) {
                                     <?php endif; ?>
                                 </li>
                                 <?php foreach ($aboutMore as $line): ?>
-                                    <li class="hidden" data-model-detail><?php echo htmlspecialchars($line, ENT_QUOTES, 'UTF-8'); ?></li>
+                                    <li class="hidden font-semibold" data-model-detail><?php echo htmlspecialchars($line, ENT_QUOTES, 'UTF-8'); ?></li>
                                 <?php endforeach; ?>
                                 <?php if (!empty($aboutMore)): ?>
                                     <li class="hidden pt-1" data-model-collapse-row>
@@ -825,17 +944,11 @@ if ($feedbackTableReady) {
                 </div>
 
                 <div class="mt-10 flex flex-col sm:flex-row items-stretch justify-start gap-4">
-                    <?php if ($registrantCount >= 20): ?>
-                        <button type="button" disabled class="w-full sm:w-auto min-h-11 bg-white/10 text-slate-300 font-extrabold text-base sm:text-lg px-7 py-4 rounded-2xl border border-white/10 cursor-not-allowed inline-flex items-center justify-center gap-3">
-                            <i class="fas fa-ban"></i> Session Full — 20/20 Reached
-                        </button>
-                    <?php else: ?>
-                        <button type="button" onclick="openRegistrationModal()" class="w-full sm:w-auto min-h-11 group relative overflow-hidden bg-gradient-to-r from-amber-500 to-orange-400 hover:from-amber-400 hover:to-orange-300 text-[#0f2b44] font-black text-base sm:text-lg px-7 py-4 rounded-2xl shadow-xl shadow-amber-500/20 transition-transform duration-200 hover:scale-[1.02] active:scale-[0.99] inline-flex items-center justify-center gap-3">
-                            <i class="fas fa-calendar-check"></i>
-                            <span>Register Now — It’s Free</span>
-                            <span class="absolute inset-0 bg-gradient-to-r from-transparent via-white/25 to-transparent -translate-x-full group-hover:animate-[shimmer_1.6s_infinite]"></span>
-                        </button>
-                    <?php endif; ?>
+                    <button type="button" onclick="openRegistrationModal()" class="w-full sm:w-auto min-h-11 group relative overflow-hidden bg-gradient-to-r from-amber-500 to-orange-400 hover:from-amber-400 hover:to-orange-300 text-[#0f2b44] font-black text-base sm:text-lg px-7 py-4 rounded-2xl shadow-xl shadow-amber-500/20 transition-transform duration-200 hover:scale-[1.02] active:scale-[0.99] inline-flex items-center justify-center gap-3">
+                        <i class="fas fa-calendar-check"></i>
+                        <span>Register Now — It’s Free</span>
+                        <span class="absolute inset-0 bg-gradient-to-r from-transparent via-white/25 to-transparent -translate-x-full group-hover:animate-[shimmer_1.6s_infinite]"></span>
+                    </button>
 
                     <div id="webinarCountdown" class="hidden w-full sm:w-auto min-h-11 items-center justify-start bg-white/5 backdrop-blur-md border border-white/10 px-5 py-4 rounded-2xl shadow-lg">
                         <div class="flex items-center gap-4">
@@ -852,15 +965,6 @@ if ($feedbackTableReady) {
                             </div>
                         </div>
                     </div>
-                </div>
-
-                <div class="mt-8 flex flex-col sm:flex-row items-start sm:items-center justify-start gap-4 max-w-4xl">
-                    <div class="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-amber-300 shrink-0">
-                        <i class="fas fa-users-slash"></i>
-                    </div>
-                    <p class="text-xs sm:text-sm text-slate-300 leading-relaxed italic text-left">
-                        “We cap these sessions to ensure every specific underwriting question is answered. Once we hit <span class="text-white font-bold underline decoration-amber-500/50">20 registrations</span>, the link expires.”
-                    </p>
                 </div>
 
                 <?php if ($registrantCount > 0): ?>
@@ -953,8 +1057,7 @@ if ($feedbackTableReady) {
             <!-- Modal Header -->
             <div class="px-6 py-4 md:px-12 md:py-8 border-b border-white/5 flex items-center justify-between bg-white/5 shrink-0">
                 <div>
-                    <h3 id="caseExamplesTitle" class="text-xl md:text-3xl font-black text-white tracking-tight uppercase leading-tight">Case Examples</h3>
-                    <p class="text-slate-400 text-[10px] md:text-sm font-medium mt-1 uppercase tracking-[0.2em]">Real Performance & Track Record</p>
+                    <h3 id="caseExamplesTitle" class="text-xl md:text-3xl font-black text-amber-400 tracking-tight uppercase leading-tight">Real Performance</h3>
                 </div>
                 <button onclick="closeCaseExamplesModal()" class="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-white/5 hover:bg-white/10 text-white flex items-center justify-center transition-all hover:rotate-90 group border border-white/10 active:scale-95 shrink-0" aria-label="Close modal">
                     <i class="fas fa-times text-lg md:text-xl group-hover:text-amber-400 transition-colors"></i>
@@ -974,10 +1077,10 @@ if ($feedbackTableReady) {
                     </div>
                     
                     <!-- Navigation Controls -->
-                    <button type="button" onclick="caseExamplesPrev()" class="absolute left-6 top-1/2 -translate-y-1/2 w-14 h-14 rounded-2xl bg-white/5 hover:bg-white/10 text-white border border-white/10 backdrop-blur-md transition-all flex items-center justify-center group/nav z-30">
+                    <button type="button" onclick="caseExamplesPrev()" class="absolute left-6 top-1/2 -translate-y-1/2 w-14 h-14 rounded-2xl bg-amber-400 hover:bg-amber-300 text-[#0f2b44] border border-amber-200 backdrop-blur-md transition-all flex items-center justify-center group/nav z-30 shadow-xl shadow-amber-500/30">
                         <i class="fas fa-chevron-left group-hover/nav:-translate-x-1 transition-transform"></i>
                     </button>
-                    <button type="button" onclick="caseExamplesNext()" class="absolute right-6 top-1/2 -translate-y-1/2 w-14 h-14 rounded-2xl bg-white/5 hover:bg-white/10 text-white border border-white/10 backdrop-blur-md transition-all flex items-center justify-center group/nav z-30">
+                    <button type="button" onclick="caseExamplesNext()" class="absolute right-6 top-1/2 -translate-y-1/2 w-14 h-14 rounded-2xl bg-amber-400 hover:bg-amber-300 text-[#0f2b44] border border-amber-200 backdrop-blur-md transition-all flex items-center justify-center group/nav z-30 shadow-xl shadow-amber-500/30">
                         <i class="fas fa-chevron-right group-hover/nav:translate-x-1 transition-transform"></i>
                     </button>
                 </div>
@@ -1121,7 +1224,7 @@ if ($feedbackTableReady) {
 
                         <div class="flex items-center gap-3 opacity-50">
                             <div class="h-px flex-1 bg-white/20"></div>
-                            <span class="text-[30px] font-black uppercase tracking-[0.3em] text-white">MIOYM FAQ’s</span>
+                            <span class="text-[30px] font-black uppercase tracking-[0.3em] text-white">FAQ’s</span>
                             <div class="h-px flex-1 bg-white/20"></div>
                         </div>
 
@@ -1147,7 +1250,7 @@ if ($feedbackTableReady) {
 
                         <div class="space-y-4">
                             <h4 class="text-[30px] font-bold text-amber-400 leading-snug">How long is my money tied up for?</h4>
-                            <p class="text-slate-300 text-[30px] leading-relaxed font-medium">Generally, we look to have your investment liquidated at 12 months, however if we sell it prior to 12 months then you will get your principle plus 15% per annum returned to you.</p>
+                            <p class="text-slate-300 text-[30px] leading-relaxed font-medium">Generally, we look to have your investment liquidated at 12 months, however if we sell it prior to 12 months then you will get your principle plus targeted 15% per annum returned to you.</p>
                         </div>
 
                         <div class="space-y-4">
@@ -1180,43 +1283,33 @@ if ($feedbackTableReady) {
                                     <i class="fas fa-star text-[8px]"></i> Special Program
                                 </div>
                                 <p class="text-white text-[30px] leading-tight font-black mb-4">
-                                    In addition to traditional sales, we leverage our Rent-to-Own Program to help individuals and families with less-than-stellar credit transition into homeownership. Through this program:
+                                    In addition to traditional sales, we leverage our Affordable Home Program to help individuals and families with less-than-stellar credit transition into homeownership. Through this program:
                                 </p>
                                 
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
-                                    <div class="space-y-4">
-                                        <div class="flex items-start gap-4">
-                                            <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0 border border-amber-500/30">
-                                                <span class="text-amber-400 text-[30px] font-black">01</span>
-                                            </div>
-                                            <p class="text-slate-300 text-[30px] font-medium leading-relaxed">We place qualified tenants into the property with a structured rent-to-own agreement.</p>
+                                <div class="space-y-4 mt-8">
+                                    <div class="flex items-start gap-4">
+                                        <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0 border border-amber-500/30">
+                                            <span class="text-amber-400 text-[30px] font-black">01</span>
                                         </div>
-                                        <div class="flex items-start gap-4">
-                                            <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0 border border-amber-500/30">
-                                                <span class="text-amber-400 text-[30px] font-black">02</span>
-                                            </div>
-                                            <p class="text-slate-300 text-[30px] font-medium leading-relaxed">We connect them with a credit specialist to help repair and improve their credit.</p>
-                                        </div>
+                                        <p class="text-slate-300 text-[30px] font-medium leading-relaxed">We place qualified tenants into the property with a structured affordable home program</p>
                                     </div>
-                                    <div class="space-y-4">
-                                        <div class="flex items-start gap-4">
-                                            <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0 border border-amber-500/30">
-                                                <span class="text-amber-400 text-[30px] font-black">03</span>
-                                            </div>
-                                            <p class="text-slate-300 text-[30px] font-medium leading-relaxed">Once they are mortgage-ready, we refer them to an FHA lender to secure a first-time homebuyer mortgage.</p>
+                                    <div class="flex items-start gap-4">
+                                        <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0 border border-amber-500/30">
+                                            <span class="text-amber-400 text-[30px] font-black">02</span>
                                         </div>
-                                        <div class="flex items-start gap-4">
-                                            <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0 border border-amber-500/30">
-                                                <span class="text-amber-400 text-[30px] font-black">04</span>
-                                            </div>
-                                            <p class="text-slate-300 text-[30px] font-medium leading-relaxed">As a firm, we apply a portion of their rental payments toward their down payment, making homeownership more accessible.</p>
+                                        <p class="text-slate-300 text-[30px] font-medium leading-relaxed">Once they are mortgage-ready, we refer them to an FHA lender to secure a first-time homebuyer mortgage.</p>
+                                    </div>
+                                    <div class="flex items-start gap-4">
+                                        <div class="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0 border border-amber-500/30">
+                                            <span class="text-amber-400 text-[30px] font-black">03</span>
                                         </div>
+                                        <p class="text-slate-300 text-[30px] font-medium leading-relaxed">As a firm we pay up to 6% toward closing cost as allowed by FHA and apply for first time down payment assistance from applicable state</p>
                                     </div>
                                 </div>
 
                                 <div class="mt-8 pt-8 border-t border-white/5">
                                     <p class="text-slate-400 text-[30px] leading-relaxed font-medium italic">
-                                        By utilizing multiple strategies simultaneously, we increase our ability to exit properties efficiently—whether through a standard sale or by creating new homebuyers through our Rent-to-Own Program. This approach not only enhances our success rate but also provides opportunities for families who may not otherwise qualify for homeownership, making it a win-win for both investors and buyers.
+                                        By utilizing multiple strategies simultaneously, we increase our ability to exit properties efficiently—whether through a standard sale or by creating new homebuyers through our Affordable Home Program. This approach not only enhances our success rate but also provides opportunities for families who may not otherwise qualify for homeownership, making it a win-win for both investors and buyers.
                                     </p>
                                 </div>
                             </div>
@@ -1227,7 +1320,6 @@ if ($feedbackTableReady) {
                     <div class="space-y-12 pt-12 border-t border-white/5">
                         <div class="flex items-center gap-3 opacity-50">
                             <div class="h-px flex-1 bg-white/20"></div>
-                            <span class="text-[30px] font-black uppercase tracking-[0.3em] text-white">MIOYM FAQ’s (cont’d)</span>
                             <div class="h-px flex-1 bg-white/20"></div>
                         </div>
 
@@ -1317,19 +1409,19 @@ if ($feedbackTableReady) {
             <span class="text-[#1e4a7a] font-bold text-xs tracking-[0.2em] uppercase bg-blue-50 border border-blue-100 px-4 py-2 rounded-full">why attend</span>
             <h2 class="text-3xl md:text-5xl font-black text-slate-900 mt-8 mb-16 max-w-3xl mx-auto tracking-tight">In one session you'll discover:</h2>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8 text-left">
-                <a href="https://www.youtube.com/watch?v=D-BrVcxWSb0" target="_blank" rel="noopener noreferrer" class="group relative block bg-white border border-slate-100 rounded-[2rem] p-8 shadow-sm transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl hover:border-blue-100 flex flex-col h-full min-h-[320px]">
+                <div role="button" tabindex="0" onclick="openDealFinderModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDealFinderModal();}" class="group relative block bg-white border border-slate-100 rounded-[2rem] p-8 shadow-sm transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl hover:border-blue-100 flex flex-col h-full min-h-[320px] cursor-pointer">
                     <div class="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform">🔑</div>
                     <h3 class="text-xl font-bold text-slate-900 mb-4 tracking-tight leading-snug">How We Access Opportunistic Undervalue Assets</h3>
-                    <p class="text-slate-500 text-sm leading-relaxed mb-8 flex-grow">Housing shortage + strong first-time buyer demand. Limited affordable inventory. Reliable resale pipeline</p>
+                    <p class="text-slate-500 text-sm leading-relaxed mb-8 flex-grow">Housing shortage. Limited affordable inventory.</p>
                     <span class="inline-flex items-center gap-2 text-xs font-bold text-blue-600 bg-blue-50 px-4 py-2 rounded-full w-fit group-hover:bg-blue-600 group-hover:text-white transition-colors mt-auto">
-                        Watch Video <i class="fas fa-arrow-right text-[10px]"></i>
+                        Click to View <i class="fas fa-arrow-right text-[10px]"></i>
                     </span>
-                </a>
+                </div>
 
                 <div role="button" tabindex="0" onclick="openCaseExamplesModal()" class="group relative bg-white border border-slate-100 rounded-[2rem] p-8 shadow-sm transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl hover:border-amber-100 flex flex-col h-full min-h-[320px] cursor-pointer">
                     <div class="w-14 h-14 bg-amber-50 rounded-2xl flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform">📊</div>
                     <h3 class="text-xl font-bold text-slate-900 mb-4 tracking-tight leading-snug">Case Study of Returns</h3>
-                    <p class="text-slate-500 text-sm leading-relaxed mb-8 flex-grow">Risk Management. Buy with built-in quality. Conservative ARV assumptions. Multiple exits( resale, rental, wholesale)</p>
+                    <p class="text-slate-500 text-sm leading-relaxed mb-8 flex-grow">Risk Management. Conservative ARV assumptions. Multiple exits resale, rental, wholesale</p>
                     <span class="inline-flex items-center gap-2 text-xs font-bold text-amber-600 bg-amber-50 px-4 py-2 rounded-full w-fit group-hover:bg-amber-600 group-hover:text-white transition-colors mt-auto">
                         Click to view <i class="fas fa-arrow-right text-[10px]"></i>
                     </span>
@@ -1337,7 +1429,7 @@ if ($feedbackTableReady) {
 
                 <div role="button" tabindex="0" onclick="openLiquidationModal()" class="group relative bg-white border border-slate-100 rounded-[2rem] p-8 shadow-sm transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl hover:border-green-100 flex flex-col h-full min-h-[320px] cursor-pointer">
                     <div class="w-14 h-14 bg-green-50 rounded-2xl flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform">⚖️</div>
-                    <h3 class="text-xl font-bold text-slate-900 mb-4 tracking-tight leading-snug">Liquidation Strategies</h3>
+                    <h3 class="text-xl font-bold text-slate-900 mb-4 tracking-tight leading-snug">First Time Home Buyer</h3>
                     <p class="text-slate-500 text-sm leading-relaxed mb-8 flex-grow">Step-by-step transition from renting to owning with institutional support and covered costs.</p>
                     <span class="inline-flex items-center gap-2 text-xs font-bold text-green-600 bg-green-50 px-4 py-2 rounded-full w-fit group-hover:bg-green-600 group-hover:text-white transition-colors mt-auto">
                         Click to view <i class="fas fa-arrow-right text-[10px]"></i>
@@ -1347,7 +1439,7 @@ if ($feedbackTableReady) {
                 <div role="button" tabindex="0" onclick="openContractorImageModal()" class="group relative bg-white border border-slate-100 rounded-[2rem] p-8 shadow-sm transition-all duration-300 hover:-translate-y-2 hover:shadow-2xl hover:border-purple-100 flex flex-col h-full min-h-[320px] cursor-pointer">
                     <div class="w-14 h-14 bg-purple-50 rounded-2xl flex items-center justify-center text-3xl mb-6 group-hover:scale-110 transition-transform">🤝</div>
                     <h3 class="text-xl font-bold text-slate-900 mb-4 tracking-tight leading-snug">Contractor Management</h3>
-                    <p class="text-slate-500 text-sm leading-relaxed mb-8 flex-grow">How to control boots on the ground and scpes of works</p>
+                    <p class="text-slate-500 text-sm leading-relaxed mb-8 flex-grow">How to control boots on the ground and scopes of works</p>
                     <span class="inline-flex items-center gap-2 text-xs font-bold text-purple-600 bg-purple-50 px-4 py-2 rounded-full w-fit group-hover:bg-purple-600 group-hover:text-white transition-colors mt-auto">
                         Click to view <i class="fas fa-arrow-right text-[10px]"></i>
                     </span>
@@ -1403,7 +1495,7 @@ if ($feedbackTableReady) {
                         ⚡
                     </div>
                     <h4 class="text-xl font-bold text-slate-900 mb-4">ROI Analysis</h4>
-                    <p class="text-sm text-slate-500 leading-relaxed px-4">The system filters for assets meeting our strict <span class="font-bold text-[#1e4a7a]">15% annual return</span> criteria using live data.</p>
+                    <p class="text-sm text-slate-500 leading-relaxed px-4">The system filters for assets meeting our strict <span class="font-bold text-[#1e4a7a]">15%  annual return</span> criteria using live data.</p>
                 </div>
 
                 <!-- Step 3 -->
@@ -1499,16 +1591,6 @@ if ($feedbackTableReady) {
                 </div>
             </div>
 
-            <!-- Share Experience CTA (Institutional Minimalist) -->
-            <div class="mt-12 pt-8 border-t border-slate-100 flex justify-center">
-                <button type="button" onclick="openFeedbackModal()" class="group flex items-center gap-2 px-6 py-2.5 rounded-full border border-transparent hover:border-slate-100 hover:bg-slate-50/50 transition-all duration-300">
-                    <span class="text-sm font-medium text-slate-600 group-hover:text-[#1e4a7a] transition-colors">
-                        Are you a verified investor? <span class="text-slate-400 font-normal mx-1">|</span> Share your experience
-                    </span>
-                    <i class="fas fa-arrow-right text-[10px] text-slate-400 group-hover:text-[#1e4a7a] transition-all duration-300 transform group-hover:translate-x-1"></i>
-                </button>
-            </div>
-
         <!-- ========== SECTION 4.4: FINAL RISK REVERSAL CTA ========== -->
         <div class="bg-slate-950 text-white rounded-[3rem] md:rounded-[5rem] py-20 md:py-32 px-6 sm:px-12 shadow-2xl mt-32 mb-20 relative overflow-hidden border border-white/5 max-w-[1400px] mx-auto">
             <div class="absolute -top-40 -right-40 w-96 h-96 bg-blue-600/10 rounded-full blur-[120px]"></div>
@@ -1529,7 +1611,7 @@ if ($feedbackTableReady) {
                     </p>
                     <div class="mt-8 p-6 md:p-8 bg-white/5 border border-white/10 rounded-3xl backdrop-blur-sm">
                         <p class="text-base md:text-lg italic text-slate-200">
-                            "Don't miss this <span class="text-amber-400 font-bold">15% annualized return</span> opportunity. If you're looking for a definitive answer on where to deploy capital in 2026, this is it."
+                            "Don't miss this <span class="text-amber-400 font-bold">15% targeted annualized return</span> opportunity. If you're looking for a definitive answer on where to deploy capital in 2026, this is it."
                         </p>
                     </div>
                 </div>
@@ -1540,7 +1622,7 @@ if ($feedbackTableReady) {
                         <i class="fas fa-arrow-right relative z-10 transition-transform group-hover:translate-x-2"></i>
                         <div class="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:animate-[shimmer_2s_infinite]"></div>
                     </button>
-                    <p class="mt-6 text-[10px] font-bold text-white/30 uppercase tracking-[0.3em]">limited to 20 participants per session</p>
+                    <p class="mt-6 text-[10px] font-bold text-white/30 uppercase tracking-[0.3em]">secure your free spot today</p>
                 </div>
                 
                 <div class="mt-24 grid grid-cols-1 sm:grid-cols-3 gap-8 pt-12 border-t border-white/5">
@@ -1613,70 +1695,6 @@ if ($feedbackTableReady) {
         </div>
     </main>
 
-    <!-- Feedback Modal -->
-    <div id="feedbackModal" class="fixed inset-0 z-[200] hidden overflow-y-auto overflow-x-hidden">
-        <div class="flex min-h-screen items-center justify-center p-4 text-center sm:p-0">
-            <div id="feedbackOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm transition-opacity opacity-0"></div>
-
-            <div id="feedbackPanel" class="relative mx-auto w-full min-w-0 max-w-[calc(100%-2rem)] transform overflow-hidden rounded-[2rem] bg-white text-left shadow-2xl transition-all sm:my-8 sm:max-w-lg opacity-0 translate-y-4">
-                <div class="bg-[#0f2b44] p-8 relative overflow-hidden">
-                    <button onclick="closeFeedbackModal()" class="absolute top-6 right-6 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors z-20">
-                        <i class="fas fa-times"></i>
-                    </button>
-                    <div class="relative z-10">
-                        <h2 class="text-2xl font-black text-white tracking-tight">Share Your Experience</h2>
-                        <p class="text-white/60 mt-2 text-sm">Your feedback helps us maintain institutional excellence.</p>
-                    </div>
-                    <div class="absolute -top-24 -right-24 w-64 h-64 bg-white/5 rounded-full blur-3xl"></div>
-                </div>
-
-                <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="p-8 space-y-6">
-                    <input type="hidden" name="feedback_submit" value="1">
-                    
-                    <div class="space-y-2">
-                        <label class="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Full Name</label>
-                        <input type="text" name="r_name" required placeholder="John Doe" class="w-full px-5 py-4 rounded-2xl bg-slate-50 border border-slate-100 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 transition-all text-base">
-                    </div>
-
-                    <div class="space-y-2">
-                        <label class="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Rating</label>
-                        <div class="flex items-center gap-2 p-1">
-                            <div class="flex flex-row-reverse justify-end gap-1">
-                                <?php for($i=5; $i>=1; $i--): ?>
-                                <input type="radio" id="star<?php echo $i; ?>" name="r_rating" value="<?php echo $i; ?>" class="peer hidden" required <?php echo $i === 5 ? 'checked' : ''; ?>>
-                                <label for="star<?php echo $i; ?>" class="cursor-pointer text-2xl text-slate-200 hover:text-amber-400 peer-checked:text-amber-400 transition-colors">
-                                    <i class="fas fa-star"></i>
-                                </label>
-                                <?php endfor; ?>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="space-y-2">
-                        <label class="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Email Address <span class="text-[10px] font-medium text-slate-400 italic">(Optional)</span></label>
-                        <input type="email" name="r_email" placeholder="john@example.com" class="w-full px-5 py-4 rounded-2xl bg-slate-50 border border-slate-100 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 transition-all text-base">
-                    </div>
-
-                    <div class="space-y-2">
-                        <label class="text-xs font-bold text-slate-500 uppercase tracking-widest ml-1">Your Message</label>
-                        <textarea name="r_message" required rows="4" placeholder="How was your experience with Mioym Equities?" class="w-full px-5 py-4 rounded-2xl bg-slate-50 border border-slate-100 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-4 focus:ring-blue-500/5 focus:border-blue-500 transition-all text-base resize-none"></textarea>
-                    </div>
-
-                    <div class="flex justify-center">
-                        <div class="g-recaptcha" data-sitekey="<?php echo htmlspecialchars($recaptcha_site_key, ENT_QUOTES, 'UTF-8'); ?>"></div>
-                    </div>
-
-                    <div class="pt-4">
-                        <button type="submit" class="w-full group relative flex items-center justify-center gap-3 rounded-2xl bg-[#0f2b44] hover:bg-[#1e4a7a] text-white font-black text-lg py-5 shadow-2xl transition-all transform hover:-translate-y-1 active:scale-[0.98] overflow-hidden">
-                            <i class="fas fa-paper-plane text-lg transition-transform group-hover:translate-x-1"></i>    
-                        <span>Submit Feedback</span>
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
     <!-- Registration Modal -->
     <div id="registrationModal" class="fixed inset-0 z-[200] hidden overflow-y-auto overflow-x-hidden">
         <div class="flex min-h-screen w-full items-center justify-center p-4 text-center sm:p-0">
@@ -1687,11 +1705,11 @@ if ($feedbackTableReady) {
             <div id="registrationPanel" class="relative mx-auto w-full min-w-0 max-w-[21rem] transform overflow-hidden rounded-[1.5rem] bg-white text-left shadow-2xl transition-all sm:my-8 sm:max-w-[52rem] opacity-0 translate-y-4">
                 <div class="grid grid-cols-1 lg:grid-cols-2">
                     <!-- Left Side: Info -->
-                    <div class="hidden lg:flex p-10 flex-col justify-between bg-slate-50/50 border-r border-slate-100">
+                    <div id="modal-info-section" class="hidden lg:flex p-10 flex-col justify-between bg-slate-50/50 border-r border-slate-100">
                         <div>
                             <span class="inline-block px-4 py-1.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold uppercase tracking-widest mb-6">Exclusive Webinar</span>
                             <h2 class="text-2xl font-extrabold tracking-tight text-slate-900 leading-tight">Secure Your <span class="text-[#1e4a7a]">Financial Future</span> Today.</h2>
-                            <p class="text-slate-600 mt-5 text-base leading-relaxed">Join us for an exclusive session where we reveal our proven <span class="font-bold text-slate-900">15% annual return</span> strategy.</p>
+                            <p class="text-slate-600 mt-5 text-base leading-relaxed">Join us for an exclusive session where we reveal our proven <span class="font-bold text-slate-900">15% targeted annual return</span> strategy.</p>
                             
                             <div class="mt-10 space-y-6">
                                 <div class="flex items-center gap-4 group">
@@ -1728,7 +1746,7 @@ if ($feedbackTableReady) {
                     </div>
 
                     <!-- Right Side: Form -->
-                    <div class="bg-[#0f2b44] p-6 sm:p-8 relative overflow-hidden max-h-[80vh] flex flex-col">
+                    <div class="bg-[#0f2b44] p-6 sm:p-10 relative overflow-hidden">
                         <button onclick="closeRegistrationModal()" class="absolute top-4 right-4 sm:top-6 sm:right-6 w-9 h-9 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-colors z-20">
                             <i class="fas fa-times"></i>
                         </button>
@@ -1736,176 +1754,124 @@ if ($feedbackTableReady) {
                         <div class="absolute -top-24 -right-24 w-64 h-64 bg-white/5 rounded-full blur-3xl"></div>
                         <div class="absolute -bottom-24 -left-24 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl"></div>
 
-                        <div class="relative z-10 h-full flex flex-col min-h-0">
-                            <div class="mb-5 text-left">
+                        <div class="relative z-10 h-full flex flex-col justify-center">
+                            <div class="mb-6 text-center sm:text-left">
                                 <h2 class="text-xl sm:text-2xl font-black text-white tracking-tight leading-tight">Reserve Your Seat</h2>
-                                <p class="text-white/60 mt-2 text-xs sm:text-sm">We partner with a limited number of invenstor per project. Please complete the short application below to determine fit.</p>
+                                <p class="text-white/60 mt-2 text-xs sm:text-sm">We partner with a limited number of invenstors per project. Please complete the short application below to determine fit.</p>
                             </div>
 
-                            <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="space-y-4 min-h-0 flex flex-col flex-1" id="registrationForm">
+                            <form method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" class="space-y-5 sm:space-y-6">
                                 <input type="hidden" name="register_submit" value="1">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value'], ENT_QUOTES, 'UTF-8'); ?>">
                                 
-                                <?php if ($registrantCount >= 20): ?>
-                                    <div class="bg-slate-800/50 border border-slate-700 p-6 sm:p-8 rounded-[2rem] text-center space-y-6">
-                                        <div class="w-16 h-16 sm:w-20 sm:h-20 bg-slate-700/50 rounded-full flex items-center justify-center mx-auto border border-slate-600">
-                                            <i class="fas fa-lock text-2xl sm:text-3xl text-slate-400"></i>
+                                    <div class="space-y-2">
+                                        <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide uppercase">Full Name</label>
+                                        <div class="relative group">
+                                            <span class="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-amber-400 transition-colors"><i class="far fa-user"></i></span>
+                                            <input type="text" name="fullname" required placeholder="John Doe" value="<?php echo htmlspecialchars($_POST['fullname'] ?? ''); ?>" class="w-full pl-12 pr-5 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder:text-white/20 focus:outline-none focus:ring-4 focus:ring-amber-400/10 focus:border-amber-400/40 focus:bg-white/10 transition-all text-base">
                                         </div>
-                                        <div>
-                                            <h3 class="text-lg sm:text-xl font-bold text-white mb-2">Registration Closed</h3>
-                                            <p class="text-slate-400 text-xs sm:text-sm leading-relaxed">
-                                                We have reached our maximum capacity of <span class="text-white font-bold">20 participants</span> for this session.
-                                            </p>
+                                    </div>
+
+                                    <div class="space-y-2">
+                                        <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide uppercase">Email Address</label>
+                                        <div class="relative group">
+                                            <span class="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-amber-400 transition-colors"><i class="far fa-envelope"></i></span>
+                                            <input type="email" name="email" required placeholder="john@example.com" value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>" class="w-full pl-12 pr-5 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder:text-white/20 focus:outline-none focus:ring-4 focus:ring-amber-400/10 focus:border-amber-400/40 focus:bg-white/10 transition-all text-base">
                                         </div>
-                                        <button type="button" onclick="closeRegistrationModal()" class="w-full py-4 bg-white/5 hover:bg-white/10 text-white font-bold rounded-2xl transition-all border border-white/10">
-                                            Close Window
+                                    </div>
+
+                                    <div class="space-y-2">
+                                        <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide uppercase">Mobile Number</label>
+                                        <div class="relative group">
+                                            <span class="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-amber-400 transition-colors"><i class="fas fa-phone"></i></span>
+                                            <input type="text" id="phone" name="phone" required inputmode="numeric" autocomplete="tel" value="<?php echo htmlspecialchars($_POST['phone'] ?? ''); ?>" placeholder="+1 (000) 000-0000" maxlength="25" class="w-full pl-12 pr-5 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder:text-white/20 focus:outline-none focus:ring-4 focus:ring-amber-400/10 focus:border-amber-400/40 focus:bg-white/10 transition-all text-base">
+                                        </div>
+                                        <p id="phone-error" class="hidden text-[10px] font-bold text-rose-400 uppercase tracking-widest ml-1 mt-1">
+                                            <i class="fas fa-exclamation-circle mr-1"></i> Invalid phone number
+                                        </p>
+                                    </div>
+
+                                    <div class="space-y-3">
+                                        <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide">Are you liquid for $50,000?</label>
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-1">
+                                            <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
+                                                <input type="radio" name="liquid_50000" value="Yes" <?php echo (isset($_POST['liquid_50000']) && $_POST['liquid_50000'] === 'Yes') ? 'checked' : ''; ?> class="w-4 h-4 border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
+                                                <span>Yes</span>
+                                            </label>
+                                            <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
+                                                <input type="radio" name="liquid_50000" value="No" <?php echo (isset($_POST['liquid_50000']) && $_POST['liquid_50000'] === 'No') ? 'checked' : ''; ?> class="w-4 h-4 border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
+                                                <span>No</span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="space-y-3">
+                                        <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide">How soon are you looking to deploy capital?</label>
+                                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                            <?php $selected_timeline = $_POST['deploy_timeline'] ?? []; ?>
+                                            <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
+                                                <input type="checkbox" name="deploy_timeline[]" value="Immediately" <?php echo in_array('Immediately', $selected_timeline) ? 'checked' : ''; ?> data-single-group="deploy_timeline" class="w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
+                                                <span>Immediately</span>
+                                            </label>
+                                            <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
+                                                <input type="checkbox" name="deploy_timeline[]" value="30-60 days" <?php echo in_array('30-60 days', $selected_timeline) ? 'checked' : ''; ?> data-single-group="deploy_timeline" class="w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
+                                                <span>30–60 days</span>
+                                            </label>
+                                            <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
+                                                <input type="checkbox" name="deploy_timeline[]" value="3-6 months" <?php echo in_array('3-6 months', $selected_timeline) ? 'checked' : ''; ?> data-single-group="deploy_timeline" class="w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
+                                                <span>3–6 months</span>
+                                            </label>
+                                            <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
+                                                <input type="checkbox" name="deploy_timeline[]" value="Just exploring" <?php echo in_array('Just exploring', $selected_timeline) ? 'checked' : ''; ?> data-single-group="deploy_timeline" class="w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
+                                                <span>Just exploring</span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="relative py-2 group/accredited">
+                                        <label class="flex items-start gap-3 cursor-pointer">
+                                            <div class="relative flex items-center justify-center mt-1">
+                                                <input type="checkbox" name="is_accredited" <?php echo !empty($_POST['is_accredited']) ? 'checked' : ''; ?> class="peer sr-only">
+                                                <div class="w-6 h-6 rounded-lg border-2 border-white/20 bg-white/5 peer-checked:bg-amber-500 peer-checked:border-amber-500 transition-all flex items-center justify-center">
+                                                    <i class="fas fa-check text-[10px] text-[#0f2b44] opacity-0 peer-checked:opacity-100 transition-opacity"></i>
+                                                </div>
+                                            </div>
+                                            <span class="text-xs sm:text-sm font-semibold text-white/80 group-hover/accredited:text-white transition-colors leading-snug">
+                                                Are you an <span class="text-amber-400 underline underline-offset-4 decoration-amber-500/50">Accredited Investor</span>?
+                                                <span class="block text-[10px] text-white/30 font-normal mt-1 uppercase tracking-widest">This qualifies you for priority access</span>
+                                            </span>
+                                        </label>
+                                        <div class="mt-2 rounded-2xl border border-amber-400/30 bg-slate-900/95 p-4 text-xs sm:text-sm text-slate-200 leading-relaxed opacity-0 max-h-0 overflow-hidden pointer-events-none transition-all duration-200 group-hover/accredited:opacity-100 group-hover/accredited:max-h-[520px] group-hover/accredited:pointer-events-auto group-focus-within/accredited:opacity-100 group-focus-within/accredited:max-h-[520px] group-focus-within/accredited:pointer-events-auto group-has-[:checked]/accredited:!hidden">
+                                            <p class="font-bold text-amber-300 mb-2">To qualify as an Accredited Investor, you must meet at least one of the following criteria:</p>
+                                            <ul class="list-disc pl-5 space-y-1">
+                                                <li><span class="font-semibold text-white">Income:</span> I have an annual income exceeding $200,000 (or $300,000 with a spouse or spousal equivalent) in each of the two most recent years and expect the same this year.</li>
+                                                <li><span class="font-semibold text-white">Net Worth:</span> I have a net worth exceeding $1 million, either alone or with a spouse or spousal equivalent, excluding the value of my primary residence.</li>
+                                                <li><span class="font-semibold text-white">Professional Certifications:</span> I am a natural person in good standing holding a Series 7, Series 65, or Series 82 license.</li>
+                                                <li><span class="font-semibold text-white">Total Assets (Entities):</span> I represent an entity with total assets exceeding $5 million that was not formed specifically to purchase the subject securities.</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+
+                                    <?php if (!empty($regError)): ?>
+                                    <div class="bg-red-500/10 text-red-200 p-4 rounded-2xl text-xs flex items-center gap-3 border border-red-500/20">
+                                        <i class="fas fa-exclamation-circle text-base"></i> <?php echo $regError; ?>
+                                    </div>
+                                    <?php endif; ?>
+
+                                    <div class="flex justify-center sm:justify-start">
+                                        <div class="g-recaptcha" data-sitekey="<?php echo htmlspecialchars($recaptcha_site_key, ENT_QUOTES, 'UTF-8'); ?>"></div>
+                                    </div>
+
+                                    <div class="pt-4">
+                                        <button type="submit" class="w-full group relative flex items-center justify-center gap-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-[#0f2b44] font-black text-base py-4 shadow-2xl transition-all transform hover:-translate-y-1 active:scale-[0.98] overflow-hidden">
+                                            <span>Secure My Spot</span>
+                                            <i class="fas fa-arrow-right text-sm transition-transform group-hover:translate-x-1"></i>
+                                            <div class="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:animate-[shimmer_2s_infinite]"></div>
                                         </button>
+                                        <p class="text-white/30 text-[9px] sm:text-[10px] text-center mt-6 uppercase tracking-[0.2em] font-bold">
+                                            <i class="fas fa-lock mr-1"></i> Private & Confidential Access
+                                        </p>
                                     </div>
-                                <?php else: ?>
-                                    <div class="grid grid-cols-3 gap-2 mb-1" id="regProgress">
-                                        <button type="button" class="reg-step-dot w-full rounded-xl py-2 text-[11px] font-black tracking-wide bg-white/20 text-white" data-step-go="1">1. Information</button>
-                                        <button type="button" class="reg-step-dot w-full rounded-xl py-2 text-[11px] font-black tracking-wide bg-white/5 text-white/70" data-step-go="2">2. Profile</button>
-                                        <button type="button" class="reg-step-dot w-full rounded-xl py-2 text-[11px] font-black tracking-wide bg-white/5 text-white/70" data-step-go="3">3. Confirm</button>
-                                    </div>
-
-                                    <div class="overflow-y-auto pr-1 space-y-4 flex-1" id="registrationStepsContainer">
-                                        <div class="space-y-4" data-step-panel="1">
-                                            <div class="space-y-2">
-                                                <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide uppercase">Full Name</label>
-                                                <div class="relative group">
-                                                    <span class="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-amber-400 transition-colors"><i class="far fa-user"></i></span>
-                                                    <input type="text" name="fullname" required autocomplete="name" placeholder="John Doe" class="reg-required w-full pl-12 pr-5 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder:text-white/20 focus:outline-none focus:ring-4 focus:ring-amber-400/10 focus:border-amber-400/40 focus:bg-white/10 transition-all text-base">
-                                                </div>
-                                            </div>
-
-                                            <div class="space-y-2">
-                                                <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide uppercase">Email Address</label>
-                                                <div class="relative group">
-                                                    <span class="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-amber-400 transition-colors"><i class="far fa-envelope"></i></span>
-                                                    <input type="email" name="email" required autocomplete="email" placeholder="john@example.com" class="reg-required w-full pl-12 pr-5 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder:text-white/20 focus:outline-none focus:ring-4 focus:ring-amber-400/10 focus:border-amber-400/40 focus:bg-white/10 transition-all text-base">
-                                                </div>
-                                            </div>
-
-                                            <div class="space-y-2">
-                                                <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide uppercase">Mobile Number</label>
-                                                <div class="relative group">
-                                                    <span class="absolute left-5 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-amber-400 transition-colors"><i class="fas fa-phone"></i></span>
-                                                    <input type="text" id="phone" name="phone" required inputmode="numeric" autocomplete="tel" placeholder="+914 232 1234" maxlength="25" class="reg-required w-full pl-12 pr-5 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder:text-white/20 focus:outline-none focus:ring-4 focus:ring-amber-400/10 focus:border-amber-400/40 focus:bg-white/10 transition-all text-base">
-                                                </div>
-                                                <p id="phone-error" class="hidden text-[10px] font-bold text-rose-400 uppercase tracking-widest ml-1 mt-1">
-                                                    <i class="fas fa-exclamation-circle mr-1"></i> Invalid phone number
-                                                </p>
-                                            </div>
-                                        </div>
-
-                                        <div class="space-y-4 hidden" data-step-panel="2">
-                                            <div class="space-y-2">
-                                                <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide uppercase">What type of investments are you currently involved in?</label>
-                                                <div class="relative group">
-                                                    <input type="text" name="investment_type" autocomplete="off" placeholder="Real estate, private equity, stocks, etc." class="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:ring-4 focus:ring-amber-400/10 focus:border-amber-400/40 focus:bg-white/10 transition-all text-base">
-                                                </div>
-                                            </div>
-
-                                            <div class="space-y-3">
-                                                <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide uppercase">What is your primary goal?</label>
-                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                                    <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
-                                                        <input type="checkbox" name="primary_goals[]" value="Passive income" class="reg-goal w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
-                                                        <span>Passive income</span>
-                                                    </label>
-                                                    <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
-                                                        <input type="checkbox" name="primary_goals[]" value="Capital appreciation" class="reg-goal w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
-                                                        <span>Capital appreciation</span>
-                                                    </label>
-                                                    <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
-                                                        <input type="checkbox" name="primary_goals[]" value="Diversification" class="reg-goal w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
-                                                        <span>Diversification</span>
-                                                    </label>
-                                                    <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
-                                                        <input type="checkbox" name="primary_goals[]" value="Short-term opportunities" class="reg-goal w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
-                                                        <span>Short-term opportunities</span>
-                                                    </label>
-                                                </div>
-                                            </div>
-
-                                            <div class="space-y-3 hidden" id="deployTimelineSection">
-                                                <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide uppercase">How soon are you looking to deploy capital?</label>
-                                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                                    <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
-                                                        <input type="checkbox" name="deploy_timeline[]" value="Immediately" class="w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
-                                                        <span>Immediately</span>
-                                                    </label>
-                                                    <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
-                                                        <input type="checkbox" name="deploy_timeline[]" value="30-60 days" class="w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
-                                                        <span>30–60 days</span>
-                                                    </label>
-                                                    <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
-                                                        <input type="checkbox" name="deploy_timeline[]" value="3-6 months" class="w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
-                                                        <span>3–6 months</span>
-                                                    </label>
-                                                    <label class="flex items-center gap-3 text-white/85 text-sm font-semibold">
-                                                        <input type="checkbox" name="deploy_timeline[]" value="Just exploring" class="w-4 h-4 rounded border-white/30 bg-white/10 text-amber-400 focus:ring-amber-400/30">
-                                                        <span>Just exploring</span>
-                                                    </label>
-                                                </div>
-                                            </div>
-
-                                            <div class="space-y-2">
-                                                <label class="text-xs sm:text-sm font-bold text-white/90 ml-1 tracking-wide uppercase">Anything else we should know?</label>
-                                                <textarea name="investor_notes" rows="3" placeholder="Share any goals, constraints, or preferred markets..." class="w-full px-5 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:ring-4 focus:ring-amber-400/10 focus:border-amber-400/40 focus:bg-white/10 transition-all text-base resize-none"></textarea>
-                                            </div>
-
-                                            <div class="relative py-1">
-                                                <label class="flex items-start gap-3 cursor-pointer group">
-                                                    <div class="relative flex items-center justify-center mt-1">
-                                                        <input type="checkbox" name="is_accredited" class="peer sr-only">
-                                                        <div class="w-6 h-6 rounded-lg border-2 border-white/20 bg-white/5 peer-checked:bg-amber-500 peer-checked:border-amber-500 transition-all flex items-center justify-center">
-                                                            <i class="fas fa-check text-[10px] text-[#0f2b44] opacity-0 peer-checked:opacity-100 transition-opacity"></i>
-                                                        </div>
-                                                    </div>
-                                                    <span class="text-xs sm:text-sm font-semibold text-white/80 group-hover:text-white transition-colors leading-snug">
-                                                        Are you an <span class="text-amber-400 underline underline-offset-4 decoration-amber-500/50">Accredited Investor</span>?
-                                                        <span class="block text-[10px] text-white/30 font-normal mt-1 uppercase tracking-widest">This qualifies you for priority access</span>
-                                                    </span>
-                                                </label>
-                                            </div>
-                                        </div>
-
-                                        <div class="space-y-4 hidden" data-step-panel="3">
-                                            <?php if (!empty($regError)): ?>
-                                            <div class="bg-red-500/10 text-red-200 p-4 rounded-2xl text-xs flex items-center gap-3 border border-red-500/20">
-                                                <i class="fas fa-exclamation-circle text-base"></i> <?php echo $regError; ?>
-                                            </div>
-                                            <?php endif; ?>
-
-                                            <div class="text-xs text-white/80 bg-white/5 border border-white/10 rounded-xl p-3">
-                                                Review your details then complete captcha to submit.
-                                            </div>
-
-                                            <div class="flex justify-start">
-                                                <div class="g-recaptcha" data-sitekey="<?php echo htmlspecialchars($recaptcha_site_key, ENT_QUOTES, 'UTF-8'); ?>"></div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div class="pt-2 border-t border-white/10 flex items-center justify-between gap-3">
-                                        <button type="button" id="regSaveExitBtn" class="min-h-11 px-4 py-2 rounded-xl border border-white/15 text-white/80 hover:text-white hover:bg-white/10 transition-all font-bold text-xs sm:text-sm">
-                                            Save & Exit
-                                        </button>
-                                        <div class="flex items-center gap-2">
-                                            <button type="button" id="regPrevBtn" class="min-h-11 px-4 py-2 rounded-xl border border-white/15 text-white/90 hover:bg-white/10 transition-all font-bold text-xs sm:text-sm hidden">Back</button>
-                                            <button type="button" id="regNextBtn" class="min-h-11 px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-all font-black text-xs sm:text-sm">Next</button>
-                                            <button type="submit" id="regSubmitBtn" class="min-h-11 group relative hidden items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-[#0f2b44] font-black text-xs sm:text-sm px-4 py-2 shadow-xl transition-all transform hover:-translate-y-0.5 active:scale-[0.98] overflow-hidden">
-                                                <span>Secure My Spot</span>
-                                                <i class="fas fa-arrow-right text-xs transition-transform group-hover:translate-x-1"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    <p class="text-white/30 text-[9px] sm:text-[10px] text-center uppercase tracking-[0.2em] font-bold">
-                                        <i class="fas fa-lock mr-1"></i> Private & Confidential Access
-                                    </p>
-                                <?php endif; ?>
                             </form>
                         </div>
                     </div>
@@ -1989,19 +1955,7 @@ if ($feedbackTableReady) {
     <script>
         const phoneInput = document.querySelector("#phone");
         const phoneError = document.querySelector("#phone-error");
-        const regForm = document.getElementById('registrationForm') || document.querySelector("#registrationModal form");
-        const regStepPanels = Array.from(document.querySelectorAll('[data-step-panel]'));
-        const regStepDots = Array.from(document.querySelectorAll('.reg-step-dot'));
-        const regNextBtn = document.getElementById('regNextBtn');
-        const regPrevBtn = document.getElementById('regPrevBtn');
-        const regSubmitBtn = document.getElementById('regSubmitBtn');
-        const regSaveExitBtn = document.getElementById('regSaveExitBtn');
-        const regRequiredInputs = Array.from(document.querySelectorAll('.reg-required'));
-        const regGoalChecks = Array.from(document.querySelectorAll('.reg-goal'));
-        const deployTimelineSection = document.getElementById('deployTimelineSection');
-        const registrationStepsContainer = document.getElementById('registrationStepsContainer');
-        const registrationDraftKey = 'mioym_registration_draft_v1';
-        let currentRegStep = 1;
+        const regForm = document.querySelector("#registrationModal form");
 
         function sanitizePhoneValue() {
             if (!phoneInput) return '';
@@ -2014,152 +1968,72 @@ if ($feedbackTableReady) {
             phoneError?.classList.add('hidden');
             phoneInput.classList.remove('border-rose-500');
         });
+        
+        phoneInput?.addEventListener('keyup', function(e) {
+            let v = phoneInput.value.replace(/\D+/g, '');
+            // Auto-format as +1 (000) 000-0000
+            if (v.length > 0) {
+                if (v.startsWith('1')) {
+                    v = v.substring(1); // Remove leading 1 for formatting
+                }
+                let formatted = '+1 ';
+                if (v.length > 0) {
+                    formatted += '(' + v.substring(0, Math.min(3, v.length));
+                    v = v.substring(Math.min(3, v.length));
+                }
+                if (v.length > 0) {
+                    formatted += ') ' + v.substring(0, Math.min(3, v.length));
+                    v = v.substring(Math.min(3, v.length));
+                }
+                if (v.length > 0) {
+                    formatted += '-' + v.substring(0, Math.min(4, v.length));
+                }
+                phoneInput.value = formatted;
+            }
+        });
 
         phoneInput?.addEventListener('blur', function() {
             const v = sanitizePhoneValue();
-            if (v !== '' && v.length < 7) {
+            // Remove +1 and country code for validation
+            let digits = v.replace(/\D+/g, '');
+            if (digits.startsWith('1')) {
+                digits = digits.substring(1);
+            }
+            if (digits !== '' && (digits.length < 10 || !preg_match(/^[2-9]/, digits))) {
                 phoneError?.classList.remove('hidden');
                 phoneInput.classList.add('border-rose-500');
             }
         });
 
-        function setFieldInvalid(input, invalid) {
-            if (!input) return;
-            input.classList.toggle('border-rose-500', !!invalid);
-        }
-
-        function updateDeployTimelineVisibility() {
-            if (!deployTimelineSection) return;
-            const hasGoal = regGoalChecks.some(c => c.checked);
-            deployTimelineSection.classList.toggle('hidden', !hasGoal);
-        }
-
-        function showRegStep(step) {
-            const total = regStepPanels.length || 1;
-            currentRegStep = Math.max(1, Math.min(step, total));
-            regStepPanels.forEach((p) => {
-                const pStep = Number(p.getAttribute('data-step-panel') || 1);
-                p.classList.toggle('hidden', pStep !== currentRegStep);
-            });
-            regStepDots.forEach((d) => {
-                const dStep = Number(d.getAttribute('data-step-go') || 1);
-                const active = dStep === currentRegStep;
-                d.classList.toggle('bg-white/20', active);
-                d.classList.toggle('text-white', active);
-                d.classList.toggle('bg-white/5', !active);
-                d.classList.toggle('text-white/70', !active);
-            });
-            if (regPrevBtn) regPrevBtn.classList.toggle('hidden', currentRegStep === 1);
-            if (regNextBtn) regNextBtn.classList.toggle('hidden', currentRegStep === total);
-            if (regSubmitBtn) regSubmitBtn.classList.toggle('hidden', currentRegStep !== total);
-            registrationStepsContainer?.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-
-        function validateRegStep(step) {
-            if (!regForm) return true;
-            let ok = true;
-            if (step === 1) {
-                const fullname = regForm.querySelector('input[name="fullname"]');
-                const email = regForm.querySelector('input[name="email"]');
-                const phone = regForm.querySelector('input[name="phone"]');
-                if (fullname && fullname.value.trim() === '') { setFieldInvalid(fullname, true); ok = false; }
-                if (email && !email.checkValidity()) { setFieldInvalid(email, true); ok = false; }
-                const pv = sanitizePhoneValue();
-                if (phone && (pv === '' || pv.length < 7)) {
-                    setFieldInvalid(phone, true);
-                    phoneError?.classList.remove('hidden');
-                    ok = false;
-                }
-            }
-            return ok;
-        }
-
-        function saveRegistrationDraft() {
-            if (!regForm) return;
-            const data = {};
-            Array.from(regForm.elements).forEach((el) => {
-                if (!el || !el.name || el.type === 'hidden') return;
-                if (el.type === 'checkbox') {
-                    if (!data[el.name]) data[el.name] = [];
-                    if (el.checked) data[el.name].push(el.value || '1');
-                    return;
-                }
-                if (el.type === 'radio') {
-                    if (el.checked) data[el.name] = el.value;
-                    return;
-                }
-                data[el.name] = el.value;
-            });
-            data.__step = currentRegStep;
-            localStorage.setItem(registrationDraftKey, JSON.stringify(data));
-        }
-
-        function restoreRegistrationDraft() {
-            if (!regForm) return;
-            const raw = localStorage.getItem(registrationDraftKey);
-            if (!raw) return;
-            try {
-                const data = JSON.parse(raw);
-                Array.from(regForm.elements).forEach((el) => {
-                    if (!el || !el.name || el.type === 'hidden') return;
-                    if (!(el.name in data)) return;
-                    if (el.type === 'checkbox') {
-                        const arr = Array.isArray(data[el.name]) ? data[el.name] : [];
-                        el.checked = arr.includes(el.value || '1');
-                        return;
-                    }
-                    if (el.type === 'radio') {
-                        el.checked = data[el.name] === el.value;
-                        return;
-                    }
-                    el.value = data[el.name] ?? '';
-                });
-                updateDeployTimelineVisibility();
-                showRegStep(Number(data.__step || 1));
-            } catch (e) {}
-        }
-
-        regRequiredInputs.forEach((input) => {
-            input.addEventListener('input', () => setFieldInvalid(input, false));
-            input.addEventListener('blur', () => {
-                if (input.type === 'email') {
-                    setFieldInvalid(input, !input.checkValidity());
-                } else {
-                    setFieldInvalid(input, input.value.trim() === '');
-                }
-            });
-        });
-
-        regGoalChecks.forEach((c) => c.addEventListener('change', updateDeployTimelineVisibility));
-        updateDeployTimelineVisibility();
-
-        regNextBtn?.addEventListener('click', () => {
-            if (!validateRegStep(currentRegStep)) return;
-            showRegStep(currentRegStep + 1);
-        });
-        regPrevBtn?.addEventListener('click', () => showRegStep(currentRegStep - 1));
-        regStepDots.forEach((d) => d.addEventListener('click', () => {
-            const target = Number(d.getAttribute('data-step-go') || 1);
-            if (target > currentRegStep && !validateRegStep(currentRegStep)) return;
-            showRegStep(target);
-        }));
-        regSaveExitBtn?.addEventListener('click', () => {
-            saveRegistrationDraft();
-            closeRegistrationModal();
-        });
-
         if (regForm) {
             regForm.addEventListener('submit', function(e) {
-                if (!validateRegStep(1)) {
+                const v = sanitizePhoneValue();
+                let digits = v.replace(/\D+/g, '');
+                if (digits.startsWith('1')) {
+                    digits = digits.substring(1);
+                }
+                if (digits !== '' && (digits.length < 10 || !preg_match(/^[2-9]/, digits))) {
                     e.preventDefault();
-                    showRegStep(1);
+                    phoneError?.classList.remove('hidden');
+                    phoneInput?.classList.add('border-rose-500');
+                    phoneInput?.focus();
                     return false;
                 }
-                localStorage.removeItem(registrationDraftKey);
             });
         }
 
-        showRegStep(1);
+        const singleChoiceChecks = document.querySelectorAll('#registrationModal input[type="checkbox"][data-single-group]');
+        singleChoiceChecks.forEach((input) => {
+            input.addEventListener('change', function() {
+                if (!this.checked) return;
+                const group = this.getAttribute('data-single-group');
+                if (!group) return;
+                const peers = document.querySelectorAll('#registrationModal input[type="checkbox"][data-single-group="' + group + '"]');
+                peers.forEach((peer) => {
+                    if (peer !== this) peer.checked = false;
+                });
+            });
+        });
 
         const adminPasswordInput = document.querySelector('#adminLoginModal input[name="password"]');
         const adminPasswordToggle = document.getElementById('toggleAdminPassword');
@@ -2177,46 +2051,8 @@ if ($feedbackTableReady) {
         const regOverlay = document.getElementById('registrationOverlay');
         const regPanel = document.getElementById('registrationPanel');
 
-        // --- Feedback Modal ---
-        const feedbackModal = document.getElementById('feedbackModal');
-        const feedbackOverlay = document.getElementById('feedbackOverlay');
-        const feedbackPanel = document.getElementById('feedbackPanel');
-
-        function openFeedbackModal() {
-            if (!feedbackModal) return;
-            feedbackModal.classList.remove('hidden');
-            setTimeout(() => {
-                feedbackOverlay.classList.remove('opacity-0');
-                feedbackOverlay.classList.add('opacity-100');
-                feedbackPanel.classList.remove('opacity-0', 'translate-y-4');
-                feedbackPanel.classList.add('opacity-100', 'translate-y-0');
-            }, 10);
-            document.body.style.overflow = 'hidden';
-            document.documentElement.style.overflow = 'hidden';
-        }
-
-        function closeFeedbackModal() {
-            if (!feedbackModal) return;
-            feedbackOverlay.classList.remove('opacity-100');
-            feedbackOverlay.classList.add('opacity-0');
-            feedbackPanel.classList.remove('opacity-100', 'translate-y-0');
-            feedbackPanel.classList.add('opacity-0', 'translate-y-4');
-            setTimeout(() => {
-                feedbackModal.classList.add('hidden');
-            }, 300);
-            document.body.style.overflow = '';
-            document.documentElement.style.overflow = '';
-        }
-
-        if (feedbackOverlay) {
-            feedbackOverlay.addEventListener('click', closeFeedbackModal);
-        }
-
         function openRegistrationModal() {
             if (!regModal) return;
-            restoreRegistrationDraft();
-            updateDeployTimelineVisibility();
-            if (!localStorage.getItem(registrationDraftKey)) showRegStep(1);
             regModal.classList.remove('hidden');
             setTimeout(() => {
                 regOverlay.classList.remove('opacity-0');
@@ -2462,6 +2298,15 @@ if ($feedbackTableReady) {
         const statesMapModal = document.getElementById('statesMapModal');
         const statesMapContainer = document.getElementById('statesMapContainer');
         const galleries = {
+            dealFinder: {
+                layout: 'single',
+                images: [
+                    'img/Liquidation.jpeg',
+                    'img/Liquidation2.jpeg',
+                    'img/Liquidation3.jpeg',
+                    'img/Liquidation4.jpeg'
+                ]
+            },
             caseExamples: {
                 layout: 'single',
                 images: [
@@ -2529,6 +2374,10 @@ if ($feedbackTableReady) {
 
         function openCaseExamplesModal(startIndex = 0) {
             openGalleryModal('caseExamples', startIndex);
+        }
+
+        function openDealFinderModal(startIndex = 0) {
+            openGalleryModal('dealFinder', startIndex);
         }
 
         function openLiquidationModal() {
@@ -2797,10 +2646,6 @@ if ($feedbackTableReady) {
                     closeQaSessionModal();
                     return;
                 }
-                if (feedbackModal && !feedbackModal.classList.contains('hidden')) {
-                    closeFeedbackModal();
-                    return;
-                }
                 if (statesMapModal && !statesMapModal.classList.contains('hidden')) {
                     closeStatesMapModal();
                     return;
@@ -2869,15 +2714,10 @@ if ($feedbackTableReady) {
         // --- Webinar Countdown Logic ---
         (() => {
             const countdownEl = document.getElementById('webinarCountdown');
-            const targetDateStr = "<?php echo $latestWebinar['schedule_date&time'] ?? ''; ?>";
+            const targetDate = <?php echo (int)$countdownTargetMs; ?>;
             const webinarDuration = "<?php echo $latestWebinar['duration'] ?? '60-minute'; ?>";
             
-            if (!countdownEl || !targetDateStr) return;
-
-            // Robust parsing for "YYYY-MM-DD HH:MM:SS"
-            const parts = targetDateStr.split(/[- :]/);
-            if (parts.length < 5) return;
-            const targetDate = new Date(parts[0], parts[1]-1, parts[2], parts[3], parts[4], parts[5] || 0).getTime();
+            if (!countdownEl || !targetDate) return;
             
             const daysEl = document.getElementById('cd-days');
             const hoursEl = document.getElementById('cd-hours');
@@ -2979,6 +2819,34 @@ if ($feedbackTableReady) {
         
         // Initialize: show the first slide
         showLiquidationSlide(currentLiquidationSlide);
+    </script>
+
+    <!-- Real-Time Landing Page Updates (AJAX Polling every 20s) -->
+    <script>
+        setInterval(() => {
+            // Do not refresh if any modal is open (so we don't interrupt the user)
+            const isModalOpen = document.querySelectorAll('[role="dialog"]:not(.hidden), #registrationModal:not(.hidden), #adminLoginModal:not(.hidden)').length > 0;
+            if (isModalOpen) return;
+
+            fetch(window.location.href)
+                .then(res => res.text())
+                .then(html => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    
+                    const currentTitle = document.querySelector('.hero-content h1')?.innerText.trim();
+                    const newTitle = doc.querySelector('.hero-content h1')?.innerText.trim();
+                    
+                    const currentDate = document.getElementById('header-schedule')?.innerText.trim();
+                    const newDate = doc.getElementById('header-schedule')?.innerText.trim();
+
+                    // If the active webinar title or schedule changes, reload the page seamlessly
+                    if (newTitle && newDate && (currentTitle !== newTitle || currentDate !== newDate)) {
+                        window.location.reload();
+                    }
+                })
+                .catch(err => console.error("Auto-refresh failed", err));
+        }, 20000);
     </script>
 </body>
 </html>

@@ -17,11 +17,25 @@ try {
         $cookieParams = session_get_cookie_params();
         // Use SERVER_NAME to avoid port issues in domain field
         $domain = $_SERVER['SERVER_NAME'] ?? $cookieParams['domain'];
+        
+        // Check if running on HTTPS (production) or force secure flag
+        $isSecure = isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+        
+        // For production, ensure secure flag is always true
+        // In production environment, HTTPS should always be enabled
+        // Use environment variable - config.php will override after it's loaded
+        $forceSecure = getenv('FORCE_SECURE_COOKIE') === '1';
+        
+        if ($forceSecure && !$isSecure) {
+            // If force secure is enabled but no HTTPS, still set secure (will fail silently if not HTTPS)
+            $isSecure = true;
+        }
+        
         session_set_cookie_params([
             'lifetime' => 0,
             'path' => $cookieParams['path'],
             'domain' => $domain,
-            'secure' => isset($_SERVER['HTTPS']), // Only send over HTTPS if applicable
+            'secure' => $isSecure,
             'httponly' => true, // Prevent JavaScript access to session cookie
             'samesite' => 'Lax' // Protect against CSRF
         ]);
@@ -50,6 +64,11 @@ try {
         $pdo->exec("ALTER TABLE webinar_tbl ADD COLUMN duration VARCHAR(50) NULL DEFAULT '60-minute'");
     } catch(PDOException $e) { }
 
+    // Auto-create timezone column for webinar_tbl if it doesn't exist
+    try {
+        $pdo->exec("ALTER TABLE webinar_tbl ADD COLUMN timezone VARCHAR(100) NULL DEFAULT 'America/New_York'");
+    } catch(PDOException $e) { }
+
     // Auto-create phone column for registrants
     try {
         $pdo->exec("ALTER TABLE registrants_tbl ADD COLUMN phone VARCHAR(25) NULL");
@@ -58,6 +77,31 @@ try {
     // Auto-create country_code column for registrants
     try {
         $pdo->exec("ALTER TABLE registrants_tbl ADD COLUMN country_code VARCHAR(10) NULL");
+    } catch(PDOException $e) { }
+
+    // Reminder tracking columns for registrants
+    try {
+        $pdo->exec("ALTER TABLE registrants_tbl ADD COLUMN reminded_1w TINYINT(1) DEFAULT 0");
+    } catch(PDOException $e) { }
+    try {
+        $pdo->exec("ALTER TABLE registrants_tbl ADD COLUMN reminded_1d TINYINT(1) DEFAULT 0");
+    } catch(PDOException $e) { }
+    try {
+        $pdo->exec("ALTER TABLE registrants_tbl ADD COLUMN reminded_1h TINYINT(1) DEFAULT 0");
+    } catch(PDOException $e) { }
+    try {
+        $pdo->exec("ALTER TABLE registrants_tbl ADD COLUMN reminded_1m TINYINT(1) DEFAULT 0");
+    } catch(PDOException $e) { }
+
+    // Add indexes for optimization (vital for 100k+ rows)
+    try {
+        $pdo->exec("CREATE INDEX idx_webinar_id ON registrants_tbl(webinar_id)");
+    } catch(PDOException $e) { }
+    try {
+        $pdo->exec("CREATE INDEX idx_email ON registrants_tbl(email)");
+    } catch(PDOException $e) { }
+    try {
+        $pdo->exec("CREATE INDEX idx_fullname ON registrants_tbl(fullname)");
     } catch(PDOException $e) { }
 
     // Auto-create is_visible column for feedback
@@ -110,6 +154,24 @@ try {
     } catch(PDOException $e) {
     }
 
+    // Email Queue Table (for Drip/Batch sending 300 per day via Cron)
+    try {
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS email_queue (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                to_email VARCHAR(255) NOT NULL,
+                to_name VARCHAR(255) NULL,
+                subject VARCHAR(255) NOT NULL,
+                html_content LONGTEXT NOT NULL,
+                status ENUM('pending', 'processing', 'sent', 'failed') NOT NULL DEFAULT 'pending',
+                error_message TEXT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                sent_at TIMESTAMP NULL
+            )
+        ");
+        $pdo->exec("CREATE INDEX idx_status ON email_queue(status)");
+    } catch(PDOException $e) {}
+
     // Settings Table for Global Configuration
     try {
         $pdo->exec("
@@ -128,7 +190,11 @@ try {
             'office_phone'     => '914 566 8292 x 199',
             'mobile_phone'     => '914 400 7980',
             'office_address'   => '2900 Westchester Ave Purchase, NY 10577',
-            'enable_email_notifications' => '1' // 1 for enabled, 0 for disabled
+            'enable_email_notifications' => '1', // 1 for enabled, 0 for disabled
+            'brevo_api_key' => '',
+            'cron_secret_send_emails' => 'mioym-cron-' . bin2hex(random_bytes(8)), // Auto-generated secure key
+            'cron_secret_reminders' => 'mioym-reminder-' . bin2hex(random_bytes(8)),
+            'force_secure_cookie' => '1' // Enforce secure cookies in production (requires HTTPS)
         ];
         
         $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM settings_tbl WHERE setting_key = ?");

@@ -8,32 +8,51 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     exit;
 }
 
+// CSRF Protection
+if (!isset($_SESSION['csrf']) || !isset($_SESSION['csrf']['value']) || time() >= (int)($_SESSION['csrf']['expires'] ?? 0)) {
+    $_SESSION['csrf'] = [
+        'value' => bin2hex(random_bytes(32)),
+        'expires' => time() + 900
+    ];
+}
+
+function validate_csrf_reviews($token) {
+    if (!isset($_SESSION['csrf']['value']) || !isset($_SESSION['csrf']['expires'])) return false;
+    if (time() >= (int)$_SESSION['csrf']['expires']) return false;
+    return hash_equals($_SESSION['csrf']['value'], (string)$token);
+}
+
 $success = '';
 $error = '';
 
 // Handle Bulk Actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['bulk_action'])) {
-    $action = $_POST['bulk_action'];
-    $ids = $_POST['selected_ids'] ?? [];
+    $csrf = $_POST['csrf_token'] ?? '';
+    if (!validate_csrf_reviews($csrf)) {
+        $error = 'Security check failed. Please try again.';
+    } else {
+        $action = $_POST['bulk_action'];
+        $ids = $_POST['selected_ids'] ?? [];
     
-    if (!empty($ids)) {
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        if ($action === 'hide_selected') {
-            $stmt = $pdo->prepare("UPDATE feedback SET is_visible = 0 WHERE id IN ($placeholders)");
-            $stmt->execute($ids);
-            $success = count($ids) . " reviews hidden.";
-        } elseif ($action === 'show_selected') {
-            $stmt = $pdo->prepare("UPDATE feedback SET is_visible = 1 WHERE id IN ($placeholders)");
-            $stmt->execute($ids);
-            $success = count($ids) . " reviews shown.";
-        } elseif ($action === 'delete_selected') {
-            $stmt = $pdo->prepare("DELETE FROM feedback WHERE id IN ($placeholders)");
-            $stmt->execute($ids);
-            $success = count($ids) . " reviews deleted.";
+        if (!empty($ids)) {
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            if ($action === 'hide_selected') {
+                $stmt = $pdo->prepare("UPDATE feedback SET is_visible = 0 WHERE id IN ($placeholders)");
+                $stmt->execute($ids);
+                $success = count($ids) . " reviews hidden.";
+            } elseif ($action === 'show_selected') {
+                $stmt = $pdo->prepare("UPDATE feedback SET is_visible = 1 WHERE id IN ($placeholders)");
+                $stmt->execute($ids);
+                $success = count($ids) . " reviews shown.";
+            } elseif ($action === 'delete_selected') {
+                $stmt = $pdo->prepare("DELETE FROM feedback WHERE id IN ($placeholders)");
+                $stmt->execute($ids);
+                $success = count($ids) . " reviews deleted.";
+            }
         }
+        header('Location: admin_reviews.php?success=' . urlencode($success));
+        exit;
     }
-    header('Location: admin_reviews.php?success=' . urlencode($success));
-    exit;
 }
 
 // Handle Single Actions
@@ -225,6 +244,7 @@ function getInitials($name) {
                 <div class="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
                     <div class="overflow-x-auto custom-scrollbar">
                         <form id="reviewsForm" method="POST">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                             <input type="hidden" name="bulk_action" id="bulkActionInput">
                             <table class="w-full text-left border-collapse">
                                 <thead>
@@ -357,6 +377,7 @@ function getInitials($name) {
                     
                     <div class="flex flex-col gap-3">
                         <form method="POST">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($_SESSION['csrf']['value']); ?>">
                             <input type="hidden" name="id" id="deleteReviewId">
                             <input type="hidden" name="action" value="delete">
                             <button type="submit" class="w-full py-4 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-2xl transition-all shadow-lg shadow-rose-200">

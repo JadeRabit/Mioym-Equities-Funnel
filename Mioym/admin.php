@@ -443,7 +443,7 @@ if ($hasSource) {
                         </div>
                     </div>
                     <div class="relative z-10">
-                        <h3 class="text-4xl font-extrabold text-slate-800 tracking-tight"><?php echo number_format($totalRegistrants); ?></h3>
+                        <h3 id="kpi-registrants" class="text-4xl font-extrabold text-slate-800 tracking-tight"><?php echo number_format($totalRegistrants); ?></h3>
                         <p class="text-sm font-semibold text-slate-500 mt-1 uppercase tracking-wider">Total Registrations</p>
                     </div>
                     <!-- Decorative Element -->
@@ -463,7 +463,7 @@ if ($hasSource) {
                         </div>
                     </div>
                     <div class="relative z-10">
-                        <h3 class="text-4xl font-extrabold text-slate-800 tracking-tight"><?php echo number_format($totalEmailsSent); ?></h3>
+                        <h3 id="kpi-emails" class="text-4xl font-extrabold text-slate-800 tracking-tight"><?php echo number_format($totalEmailsSent); ?></h3>
                         <p class="text-sm font-semibold text-slate-500 mt-1 uppercase tracking-wider">Emails Delivered</p>
                     </div>
                     <!-- Decorative Element -->
@@ -792,6 +792,25 @@ if ($hasSource) {
                 });
             }
         });
+
+        // Real-Time Dashboard KPI Updates (AJAX Polling every 20s)
+        setInterval(() => {
+            fetch(window.location.href)
+                .then(res => res.text())
+                .then(html => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    
+                    ['kpi-registrants', 'kpi-emails', 'kpi-webinars'].forEach(id => {
+                        const newVal = doc.getElementById(id);
+                        const oldVal = document.getElementById(id);
+                        if (newVal && oldVal) {
+                            oldVal.innerHTML = newVal.innerHTML;
+                        }
+                    });
+                })
+                .catch(err => console.error("Auto-refresh failed", err));
+        }, 20000);
     </script>
 </body>
 </html>

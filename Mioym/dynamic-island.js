@@ -1,6 +1,8 @@
 (() => {
-  if (localStorage.getItem('theme') === 'dark') {
-    document.body.classList.add('dark-theme');
+  if (typeof document !== 'undefined' && document.body) {
+    if (localStorage.getItem('theme') === 'dark') {
+      document.body.classList.add('dark-theme');
+    }
   }
 
   const state = {
